@@ -1,0 +1,86 @@
+# Daily forecast as a sensor attribute, for the custom weather card (weather entities no longer
+# carry the forecast attribute; it must be fetched with weather.get_forecasts).
+# Source: weather.home_2 = Google Weather (switched from met.no weather.forecast_home on 2026-09-17,
+# because Google sets is_daytime on hourly items and the built-in dialog then shows moon icons).
+template:
+  - triggers:
+      - trigger: time_pattern
+        minutes: "/20"
+      - trigger: homeassistant
+        event: start
+      - trigger: state
+        entity_id: weather.home_2
+    actions:
+      - action: weather.get_forecasts
+        data: { type: daily }
+        target: { entity_id: weather.home_2 }
+        response_variable: fc
+    sensor:
+      - name: Forecast daily
+        unique_id: forecast_daily
+        icon: mdi:weather-partly-cloudy
+        state: "{{ (fc['weather.home_2'].forecast | default([])) | count }}"
+        attributes:
+          # met.no picks a 6-hour block symbol for far days, which can be "clear-night";
+          # a daily item has no night, so show it as sunny.
+          forecast: >
+            {% set ns = namespace(out=[]) %}
+            {% for f in fc['weather.home_2'].forecast | default([]) %}
+              {% set ns.out = ns.out + [dict(f, condition=('sunny' if f.condition == 'clear-night' else f.condition))] %}
+            {% endfor %}
+            {{ ns.out }}
+
+  # Hourly forecast for the "Sky" view (next 24 h).
+  # The frontend draws the moon variant of "partlycloudy" only when an item has is_daytime: false.
+  # Google sets it; for a provider that does not (met.no), we derive it from sun.sun rise/set times.
+  - triggers:
+      - trigger: time_pattern
+        minutes: "/20"
+      - trigger: homeassistant
+        event: start
+      - trigger: state
+        entity_id: weather.home_2
+    actions:
+      - action: weather.get_forecasts
+        data: { type: hourly }
+        target: { entity_id: weather.home_2 }
+        response_variable: fh
+    sensor:
+      - name: Forecast hourly
+        unique_id: forecast_hourly
+        icon: mdi:clock-outline
+        state: "{{ (fh['weather.home_2'].forecast | default([])) | count }}"
+        attributes:
+          forecast: >
+            {% set items = (fh['weather.home_2'].forecast | default([]))[:24] %}
+            {% set rise = as_local(as_datetime(state_attr('sun.sun', 'next_rising'))) %}
+            {% set sets = as_local(as_datetime(state_attr('sun.sun', 'next_setting'))) %}
+            {% set r = rise.hour * 60 + rise.minute %}
+            {% set s = sets.hour * 60 + sets.minute %}
+            {% set ns = namespace(out=[]) %}
+            {% for f in items %}
+              {% set t = as_local(as_datetime(f.datetime)) %}
+              {% set m = t.hour * 60 + t.minute %}
+              {% set ns.out = ns.out + [dict(f, is_daytime=(f.is_daytime if f.is_daytime is defined else (r <= m < s)))] %}
+            {% endfor %}
+            {{ ns.out }}
+
+  # Wrapper weather entity: a stable id (weather.home) for the dashboards, whatever the provider.
+  # Its forecasts come from the two sensors above.
+  - weather:
+      - name: Home
+        unique_id: weather_home_daynight
+        attribution: "Data from Google Weather"
+        condition: "{{ states('weather.home_2') }}"
+        temperature: "{{ state_attr('weather.home_2', 'temperature') }}"
+        temperature_unit: "°C"
+        humidity: "{{ state_attr('weather.home_2', 'humidity') }}"
+        pressure: "{{ state_attr('weather.home_2', 'pressure') }}"
+        pressure_unit: hPa
+        wind_speed: "{{ state_attr('weather.home_2', 'wind_speed') }}"
+        wind_speed_unit: km/h
+        wind_bearing: "{{ state_attr('weather.home_2', 'wind_bearing') }}"
+        cloud_coverage: "{{ state_attr('weather.home_2', 'cloud_coverage') }}"
+        precipitation_unit: mm
+        forecast_daily: "{{ state_attr('sensor.forecast_daily', 'forecast') }}"
+        forecast_hourly: "{{ state_attr('sensor.forecast_hourly', 'forecast') }}"

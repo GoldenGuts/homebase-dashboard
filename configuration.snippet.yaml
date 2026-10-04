@@ -1,0 +1,26 @@
+# Add these keys to /config/configuration.yaml (merge with what exists).
+homeassistant:
+  packages: !include_dir_named packages
+  allowlist_external_dirs: ["/config/mac"]   # optional: camera.mac_screen (Local File) reads /config/mac/screen.jpg
+
+frontend:
+  themes: !include_dir_merge_named themes
+
+lovelace:
+  mode: storage
+  dashboards:
+    dashboard-home:
+      mode: yaml
+      title: Home
+      icon: mdi:home-variant
+      show_in_sidebar: true
+      filename: dashboards/home.yaml
+
+recorder:
+  purge_keep_days: 30
+
+# The Gaming PC card's "Wake" chip calls wake_on_lan.send_magic_packet.
+wake_on_lan:
+
+# packages/mac.yaml also needs mac_claude_cmd in secrets.yaml (the one command that unlocks the
+# Mac keychain and starts Claude). See secrets.example.yaml for its shape.

@@ -1,0 +1,356 @@
+# Mac package: everything the Home dashboard's Mac card (and an optional Mac dashboard) need.
+# The Mac side lives in ../mac/ (install with ../mac/install.sh): ~/bin/mac-status.py (polled every 60 s),
+# ~/bin/mac-action.sh <fixed action> and ~/bin/claude-rc.sh (Claude Code Remote Control host per folder).
+# SSH: every command uses the host alias `mac` from /config/ssh/config (example at the end of secrets.example.yaml: HostName, User,
+# IdentityFile, BatchMode). Starting Claude must unlock the login keychain first, so that one command
+# (it contains the Mac password) lives in secrets.yaml as mac_claude_cmd (see secrets.example.yaml).
+#
+# Claude Code allows ONE `claude remote-control` host per folder; the host serves up to 32 sessions.
+# More sessions in the same folder are opened from the app through the host's environment link
+# (sensor.mac_status -> sessions_json[].env_link), which the dashboard shows as "New session".
+
+input_text:
+  claude_folder:
+    name: Claude folder
+    icon: mdi:folder-open
+    max: 255
+    initial: /Users/you/projects
+  mac_send_text:
+    name: Send to Mac
+    icon: mdi:send
+    max: 255
+
+input_select:
+  claude_mode:
+    name: Claude permission mode
+    icon: mdi:shield-check
+    options: [auto, acceptEdits, plan, default]
+    initial: auto
+
+shell_command:
+  mac_claude_rc: !secret mac_claude_cmd
+  mac_stop_claude: ssh -F /config/ssh/config mac "~/bin/mac-action.sh stop-claude '{{ name }}'"
+  mac_stop_all_claude: ssh -F /config/ssh/config mac "~/bin/mac-action.sh stop-all-claude"
+  mac_update_claude: ssh -F /config/ssh/config mac "~/bin/mac-action.sh update-claude"
+  mac_update_claude_log: ssh -F /config/ssh/config mac "~/bin/mac-action.sh update-claude-log"
+  mac_open_app: ssh -F /config/ssh/config mac "~/bin/mac-action.sh open-app '{{ app }}' '{{ folder }}'"
+  mac_quit_app: ssh -F /config/ssh/config mac "~/bin/mac-action.sh quit-app '{{ app }}'"
+  mac_sleep: ssh -F /config/ssh/config mac "~/bin/mac-action.sh sleep"
+  mac_display_off: ssh -F /config/ssh/config mac "~/bin/mac-action.sh display-off"
+  mac_lock: ssh -F /config/ssh/config mac "~/bin/mac-action.sh lock"
+  mac_caffeinate: ssh -F /config/ssh/config mac "~/bin/mac-action.sh caffeinate '{{ hours }}'"
+  mac_decaffeinate: ssh -F /config/ssh/config mac "~/bin/mac-action.sh decaffeinate"
+  mac_screenshot: ssh -F /config/ssh/config mac "~/bin/mac-action.sh screenshot"
+  mac_open_url: ssh -F /config/ssh/config mac "~/bin/mac-action.sh open-url '{{ url }}'"
+  mac_say: ssh -F /config/ssh/config mac "~/bin/mac-action.sh say '{{ text }}'"
+  mac_clip: ssh -F /config/ssh/config mac "~/bin/mac-action.sh clip '{{ text }}'"
+
+command_line:
+  - sensor:
+      name: Mac status
+      unique_id: mac_status
+      icon: mdi:laptop
+      command: "ssh -F /config/ssh/config -o ConnectTimeout=5 mac '~/bin/mac-status.py' 2>/dev/null || echo '{\"state\":\"offline\"}'"
+      value_template: "{{ value_json.state }}"
+      json_attributes:
+        - sessions
+        - session_count
+        - active_sessions
+        - session_links
+        - sessions_json
+        - claude_today
+        - apps
+        - antigravity
+        - cursor
+        - zed
+        - caffeinate
+        - caffeinate_until
+        - uptime_hours
+        - load
+        - disk_free
+        - disk_used_pct
+        - mem_free_mb
+        - mem_free_pct
+        - ip
+        - battery
+        - charging
+        - battery_cycles
+        - battery_health
+        - battery_temp
+        - battery_minutes
+        - keychain
+        - idle_seconds
+        - display_asleep
+        - top
+        - ports
+        - projects
+        - screen_ts
+        - updated
+      scan_interval: 60
+      command_timeout: 25
+
+# Last screenshot taken with script.mac_screenshot (mac-action.sh copies it to /config/mac/screen.jpg).
+# camera.mac_screen is a "Local File" config entry (UI only: Settings -> Integrations -> Local File,
+# name "Mac screen", path /config/mac/screen.jpg); configuration.yaml allowlists /config/mac for it.
+# Served through the authenticated camera proxy, never through /local.
+
+template:
+  - binary_sensor:
+      - name: Mac online
+        unique_id: mac_online
+        icon: mdi:laptop
+        device_class: connectivity
+        state: "{{ is_state('sensor.mac_status', 'online') }}"
+      - name: Mac Claude running
+        unique_id: mac_claude_running
+        icon: mdi:robot
+        state: "{{ (state_attr('sensor.mac_status', 'session_count') | int(0)) > 0 }}"
+      - name: Mac Antigravity running
+        unique_id: mac_antigravity_running
+        icon: mdi:rocket-launch
+        state: "{{ (state_attr('sensor.mac_status', 'apps') or {}).get('Antigravity') == true }}"
+      - name: Mac Cursor running
+        unique_id: mac_cursor_running
+        icon: mdi:cursor-default
+        state: "{{ (state_attr('sensor.mac_status', 'apps') or {}).get('Cursor') == true }}"
+      - name: Mac Zed running
+        unique_id: mac_zed_running
+        icon: mdi:code-braces
+        state: "{{ (state_attr('sensor.mac_status', 'apps') or {}).get('Zed') == true }}"
+      - name: Mac Chrome running
+        unique_id: mac_chrome_running
+        icon: mdi:google-chrome
+        state: "{{ (state_attr('sensor.mac_status', 'apps') or {}).get('Google Chrome') == true }}"
+      - name: Mac Ghostty running
+        unique_id: mac_ghostty_running
+        icon: mdi:console
+        state: "{{ (state_attr('sensor.mac_status', 'apps') or {}).get('Ghostty') == true }}"
+      - name: Mac caffeinated
+        unique_id: mac_caffeinated
+        icon: mdi:coffee
+        state: "{{ state_attr('sensor.mac_status', 'caffeinate') == true }}"
+  - sensor:
+      - name: Mac battery
+        unique_id: mac_battery
+        unit_of_measurement: "%"
+        device_class: battery
+        state: "{{ state_attr('sensor.mac_status', 'battery') | int(0) }}"
+      - name: Mac Claude sessions
+        unique_id: mac_claude_sessions
+        icon: mdi:robot
+        state: "{{ state_attr('sensor.mac_status', 'sessions') | default('none') }}"
+      - name: Mac Claude active sessions
+        unique_id: mac_claude_active
+        icon: mdi:robot-happy
+        state: "{{ state_attr('sensor.mac_status', 'active_sessions') | int(0) }}"
+      - name: Mac uptime
+        unique_id: mac_uptime
+        icon: mdi:clock-outline
+        unit_of_measurement: h
+        state: "{{ state_attr('sensor.mac_status', 'uptime_hours') | int(0) }}"
+      - name: Mac disk used
+        unique_id: mac_disk_used
+        icon: mdi:harddisk
+        unit_of_measurement: "%"
+        state: "{{ state_attr('sensor.mac_status', 'disk_used_pct') | int(0) }}"
+      - name: Mac load
+        unique_id: mac_load
+        icon: mdi:speedometer
+        state: "{{ state_attr('sensor.mac_status', 'load') | float(0) }}"
+
+script:
+  claude_rc_start:
+    alias: Mac - start Claude host
+    icon: mdi:robot
+    mode: queued
+    max: 4
+    fields:
+      folder: { name: Folder, description: "Full path on the Mac (default: input_text.claude_folder)", selector: { text: } }
+      mode: { name: Mode, description: "auto | acceptEdits | plan | default | resume (default: input_select.claude_mode)", selector: { text: } }
+    sequence:
+      - variables:
+          folder: "{{ folder if folder is defined and folder else states('input_text.claude_folder') }}"
+          name: "{{ folder.rstrip('/').split('/')[-1] }}"
+          mode: "{{ mode if mode is defined and mode else states('input_select.claude_mode') }}"
+      - action: shell_command.mac_claude_rc
+        data: { folder: "{{ folder }}", name: "{{ name }}", mode: "{{ mode }}" }
+        response_variable: result
+      - action: persistent_notification.create
+        data:
+          title: "Claude on Mac · {{ name }}"
+          notification_id: "claude_rc_{{ name }}"
+          message: "{{ result.stdout }} {{ result.stderr }}"
+      - action: homeassistant.update_entity
+        target: { entity_id: sensor.mac_status }
+  mac_stop_claude:
+    alias: Mac - stop Claude host
+    icon: mdi:stop-circle
+    fields:
+      name: { name: Host, description: "Host name = folder name (default: the selected folder)", selector: { text: } }
+    sequence:
+      - variables:
+          name: "{{ name if name is defined and name else states('input_text.claude_folder').rstrip('/').split('/')[-1] }}"
+      - action: shell_command.mac_stop_claude
+        data: { name: "{{ name }}" }
+        response_variable: r
+      - action: persistent_notification.dismiss
+        data: { notification_id: "claude_rc_{{ name }}" }
+      - action: homeassistant.update_entity
+        target: { entity_id: sensor.mac_status }
+  mac_stop_all_claude:
+    alias: Mac - stop all Claude hosts
+    icon: mdi:stop
+    sequence:
+      - action: shell_command.mac_stop_all_claude
+        response_variable: r
+      - action: persistent_notification.create
+        data: { title: Mac, notification_id: mac_action, message: "{{ r.stdout }} {{ r.stderr }}" }
+      - action: homeassistant.update_entity
+        target: { entity_id: sensor.mac_status }
+  # Updates the Claude Code binary only. Running hosts (and every session they serve) keep the old
+  # version until they are stopped and started again.
+  mac_update_claude:
+    alias: Mac - update Claude Code
+    icon: mdi:update
+    mode: single
+    sequence:
+      - action: shell_command.mac_update_claude
+        response_variable: r
+      - action: persistent_notification.create
+        data: { title: Claude Code update, notification_id: mac_claude_update, message: "{{ r.stdout }} {{ r.stderr }}" }
+      - repeat:
+          sequence:
+            - delay: { seconds: 10 }
+            - action: shell_command.mac_update_claude_log
+              response_variable: l
+          until: "{{ 'DONE' in (l.stdout | default('')) or repeat.index >= 30 }}"
+      - action: persistent_notification.create
+        data:
+          title: Claude Code update
+          notification_id: mac_claude_update
+          message: >-
+            {{ (l.stdout | default('no output')) | replace('DONE', '') | trim }}
+
+            Running hosts keep the old version: Stop all, then start them again.
+  mac_open_app:
+    alias: Mac - open app
+    icon: mdi:application-outline
+    fields:
+      app: { name: App, description: "Antigravity | Cursor | Zed | Google Chrome | Ghostty", selector: { text: } }
+      folder: { name: Folder, description: "Folder to open (default: the selected Claude folder)", selector: { text: } }
+    sequence:
+      - variables:
+          folder: "{{ folder if folder is defined and folder else states('input_text.claude_folder') }}"
+      - action: shell_command.mac_open_app
+        data: { app: "{{ app }}", folder: "{{ folder }}" }
+        response_variable: r
+      - action: persistent_notification.create
+        data: { title: Mac, notification_id: mac_action, message: "{{ r.stdout }} {{ r.stderr }}" }
+      - delay: { seconds: 3 }
+      - action: homeassistant.update_entity
+        target: { entity_id: sensor.mac_status }
+  mac_quit_app:
+    alias: Mac - quit app
+    icon: mdi:close-circle-outline
+    fields:
+      app: { name: App, selector: { text: } }
+    sequence:
+      - action: shell_command.mac_quit_app
+        data: { app: "{{ app }}" }
+        response_variable: r
+      - action: persistent_notification.create
+        data: { title: Mac, notification_id: mac_action, message: "{{ r.stdout }} {{ r.stderr }}" }
+      - delay: { seconds: 3 }
+      - action: homeassistant.update_entity
+        target: { entity_id: sensor.mac_status }
+  mac_sleep:
+    alias: Mac - sleep
+    icon: mdi:power-sleep
+    sequence:
+      - action: shell_command.mac_sleep
+  mac_display_off:
+    alias: Mac - screen off
+    icon: mdi:monitor-off
+    sequence:
+      - action: shell_command.mac_display_off
+      - delay: { seconds: 2 }
+      - action: homeassistant.update_entity
+        target: { entity_id: sensor.mac_status }
+  mac_lock:
+    alias: Mac - lock screen
+    icon: mdi:lock
+    sequence:
+      - action: shell_command.mac_lock
+        response_variable: r
+      - action: persistent_notification.create
+        data: { title: Mac, notification_id: mac_action, message: "{{ r.stdout }} {{ r.stderr }}" }
+  mac_caffeinate:
+    alias: Mac - stay awake
+    icon: mdi:coffee
+    fields:
+      hours: { name: Hours, description: "1-24 (default 2)", selector: { number: { min: 1, max: 24 } } }
+    sequence:
+      - action: shell_command.mac_caffeinate
+        data: { hours: "{{ hours | default(2) | int }}" }
+        response_variable: r
+      - action: persistent_notification.create
+        data: { title: Mac, notification_id: mac_action, message: "{{ r.stdout }} {{ r.stderr }}" }
+      - action: homeassistant.update_entity
+        target: { entity_id: sensor.mac_status }
+  mac_decaffeinate:
+    alias: Mac - allow sleep
+    icon: mdi:coffee-off
+    sequence:
+      - action: shell_command.mac_decaffeinate
+        response_variable: r
+      - action: persistent_notification.create
+        data: { title: Mac, notification_id: mac_action, message: "{{ r.stdout }} {{ r.stderr }}" }
+      - action: homeassistant.update_entity
+        target: { entity_id: sensor.mac_status }
+  mac_screenshot:
+    alias: Mac - capture screen
+    icon: mdi:monitor-screenshot
+    mode: single
+    sequence:
+      - action: shell_command.mac_screenshot
+        response_variable: r
+        continue_on_error: true
+      - if: "{{ r.returncode != 0 }}"
+        then:
+          - action: persistent_notification.create
+            data: { title: Mac screen, notification_id: mac_screen, message: "{{ r.stdout }} {{ r.stderr }}" }
+        else:
+          - action: persistent_notification.dismiss
+            data: { notification_id: mac_screen }
+      - action: homeassistant.update_entity
+        target: { entity_id: sensor.mac_status }
+  mac_send:
+    alias: Mac - send text (open link / say / clipboard)
+    icon: mdi:send
+    fields:
+      kind: { name: Kind, description: "url | say | clip", selector: { select: { options: [url, say, clip] } } }
+      text: { name: Text, description: "default: input_text.mac_send_text", selector: { text: } }
+    sequence:
+      - variables:
+          text: "{{ text if text is defined and text else states('input_text.mac_send_text') }}"
+      - choose:
+          - conditions: "{{ kind == 'url' }}"
+            sequence:
+              - action: shell_command.mac_open_url
+                data: { url: "{{ text }}" }
+                response_variable: r
+              - action: persistent_notification.create
+                data: { title: Mac, notification_id: mac_action, message: "{{ r.stdout }} {{ r.stderr }}" }
+          - conditions: "{{ kind == 'say' }}"
+            sequence:
+              - action: shell_command.mac_say
+                data: { text: "{{ text }}" }
+                response_variable: r
+              - action: persistent_notification.create
+                data: { title: Mac, notification_id: mac_action, message: "{{ r.stdout }} {{ r.stderr }}" }
+        default:
+          - action: shell_command.mac_clip
+            data: { text: "{{ text }}" }
+            response_variable: r
+          - action: persistent_notification.create
+            data: { title: Mac, notification_id: mac_action, message: "{{ r.stdout }} {{ r.stderr }}" }

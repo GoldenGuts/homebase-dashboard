@@ -1,0 +1,150 @@
+# Digital usage today: hours since midnight each device was in use.
+# Sources (swap entity ids in the template binary_sensors, nothing else changes):
+#   phone  -> HA companion app sensors of the phone (device name "phone": binary_sensor.phone_interactive,
+#             device_tracker.phone, sensor.phone_battery_level/_state/_charger_type, binary_sensor.phone_device_locked)
+#   mac    -> sensor.mac_status (idle_seconds from ~/bin/mac-status.py, packages/mac.yaml)
+#   pc     -> HASS.Agent (MQTT) sensor on the gaming PC (sensor.pc_process_active); "unavailable" = PC off
+#   tv     -> media_player of the streaming box on the TV (a Fire TV here)
+
+template:
+  - binary_sensor:
+      - name: "Phone active"
+        unique_id: usage_phone_active
+        icon: mdi:cellphone
+        # Interactive alone over-counts: when Android stops the app from reporting (vendor
+        # battery optimisation, network drop) the last "on" freezes and history_stats counts the
+        # whole silence. The app sends tracker/battery updates at
+        # least every ~16 min while alive, so treat 20 min of silence as "screen off".
+        # Device locked (companion app Keyguard sensor, if enabled) drops lock-screen glances.
+        state: >
+          {% set src = [states.binary_sensor.phone_interactive, states.device_tracker.phone,
+                        states.sensor.phone_battery_level, states.sensor.phone_battery_state,
+                        states.sensor.phone_charger_type] | reject('none') | list %}
+          {% set last = src | map(attribute='last_updated') | max %}
+          {{ is_state('binary_sensor.phone_interactive', 'on')
+             and (now() - last).total_seconds() < 1200
+             and not is_state('binary_sensor.phone_device_locked', 'on') }}
+      # On when the phone went silent with the screen "on". Each turn-on means phone_active
+      # counted 20 phantom minutes (last update -> cut-off); Phone usage today subtracts them.
+      - name: "Phone stale"
+        unique_id: usage_phone_stale
+        icon: mdi:cellphone-off
+        state: >
+          {% set src = [states.binary_sensor.phone_interactive, states.device_tracker.phone,
+                        states.sensor.phone_battery_level, states.sensor.phone_battery_state,
+                        states.sensor.phone_charger_type] | reject('none') | list %}
+          {% set last = src | map(attribute='last_updated') | max %}
+          {{ is_state('binary_sensor.phone_interactive', 'on')
+             and (now() - last).total_seconds() >= 1200 }}
+      - name: "Mac active"
+        unique_id: usage_mac_active
+        icon: mdi:laptop
+        state: >
+          {% set s = states('sensor.mac_status') %}
+          {% set idle = state_attr('sensor.mac_status', 'idle_seconds') | int(99999) %}
+          {% set asleep = state_attr('sensor.mac_status', 'display_asleep') | default(false) %}
+          {{ (s == 'online' and idle < 300 and not asleep) or is_state('binary_sensor.macbook_active', 'on') }}
+      - name: "PC active"
+        unique_id: usage_pc_active
+        icon: mdi:desktop-tower
+        state: >
+          {{ states('sensor.pc_process_active') not in ['unavailable', 'unknown']
+             or is_state('binary_sensor.gaming_pc_active', 'on') }}
+      - name: "TV active"
+        unique_id: usage_tv_active
+        icon: mdi:television
+        state: >
+          {% set st = states('media_player.bedroom_fire_tv') %}
+          {% set app = state_attr('media_player.bedroom_fire_tv', 'app_id') | default('', true) %}
+          {% set idle_apps = ['com.amazon.tv.launcher', 'com.amazon.tv.settings.v2', 'com.amazon.bueller.photos', 'com.amazon.tv.screensaver'] %}
+          {{ st in ['playing', 'paused', 'on']
+             or (st == 'idle' and app not in idle_apps)
+             or is_state('media_player.kodi', 'playing') }}
+
+  - sensor:
+      # Screen-on time minus the 20 min phantom per silence (close to Android's Digital Wellbeing).
+      # Entity id is used by the dashboards and the Homebase widgets app.
+      - name: "Phone usage today"
+        unique_id: phone_usage_today_net
+        unit_of_measurement: "h"
+        icon: mdi:cellphone
+        state: >
+          {{ [states('sensor.phone_screen_on_raw') | float(0)
+              - states('sensor.phone_stale_count') | float(0) * 20 / 60, 0] | max | round(3) }}
+      - name: "Digital usage today"
+        unique_id: digital_usage_today
+        unit_of_measurement: "h"
+        icon: mdi:timer-sand
+        state_class: measurement
+        state: >
+          {{ (states('sensor.phone_usage_today') | float(0)
+            + states('sensor.mac_usage_today') | float(0)
+            + states('sensor.pc_usage_today') | float(0)
+            + states('sensor.tv_usage_today') | float(0)) | round(1) }}
+        attributes:
+          phone: "{{ states('sensor.phone_usage_today') }}"
+          mac: "{{ states('sensor.mac_usage_today') }}"
+          pc: "{{ states('sensor.pc_usage_today') }}"
+          tv: "{{ states('sensor.tv_usage_today') }}"
+
+sensor:
+  # unique_id kept from when this was the displayed sensor; entity renamed to phone_screen_on_raw.
+  - platform: history_stats
+    name: "Phone screen on raw"
+    unique_id: phone_usage_today
+    entity_id: binary_sensor.phone_active
+    state: "on"
+    type: time
+    start: "{{ today_at('00:00') }}"
+    end: "{{ now() }}"
+  - platform: history_stats
+    name: "Phone stale count"
+    unique_id: phone_stale_count
+    entity_id: binary_sensor.phone_stale
+    state: "on"
+    type: count
+    start: "{{ today_at('00:00') }}"
+    end: "{{ now() }}"
+  - platform: history_stats
+    name: "Mac usage today"
+    unique_id: mac_usage_today
+    entity_id: binary_sensor.mac_active
+    state: "on"
+    type: time
+    start: "{{ today_at('00:00') }}"
+    end: "{{ now() }}"
+  - platform: history_stats
+    name: "PC usage today"
+    unique_id: pc_usage_today
+    entity_id: binary_sensor.pc_active
+    state: "on"
+    type: time
+    start: "{{ today_at('00:00') }}"
+    end: "{{ now() }}"
+  - platform: history_stats
+    name: "TV usage today"
+    unique_id: tv_usage_today
+    entity_id: binary_sensor.tv_active
+    state: "on"
+    type: time
+    start: "{{ today_at('00:00') }}"
+    end: "{{ now() }}"
+
+# Weekly totals for the "this week" bars (reset Monday 00:00).
+utility_meter:
+  digital_usage_week:
+    source: sensor.digital_usage_today
+    cycle: weekly
+    delta_values: false
+  tv_usage_week:
+    source: sensor.tv_usage_today
+    cycle: weekly
+
+# Both bedroom bulbs as one "Lights" tile. Replace the two members with your own light ids.
+light:
+  - platform: group
+    name: Bedroom lights
+    unique_id: bedroom_lights
+    entities:
+      - light.bedroom_bulb_1
+      - light.bedroom_bulb_2

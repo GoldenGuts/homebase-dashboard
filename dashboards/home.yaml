@@ -1,0 +1,791 @@
+# "Home" dashboard (YAML mode). Registered in configuration.yaml under lovelace.dashboards.
+# Cards are button-card + HTML templates (neon-glass look). Shared JS/CSS lives in templates.yaml (glass, knob, stat4 ...).
+#
+# LAYOUT (2026-09-17 "flexi" pass): three columns, each a nested grid that packs its cards
+# tightly top-to-bottom (masonry feel, no dead space between rows). Column widths differ
+# (hero column is widest). Below 1100px the right column drops under the left one; below
+# 800px everything stacks. The floating now-playing bar sits in its own "now" area.
+#
+# HEADER PATTERN: every card starts with the same header — bold 14px title on the left,
+# one muted 12px meta text on the right. No coloured words or dots inside titles.
+button_card_templates: !include templates.yaml
+
+title: Home
+views:
+  - title: Home
+    path: home
+    icon: mdi:home-variant
+    type: custom:grid-layout
+    layout:
+      grid-template-columns: minmax(0,1.3fr) minmax(0,1fr) minmax(0,1fr)
+      grid-template-areas: |
+        "left mid right"
+        "now now now"
+      grid-gap: 18px
+      padding: 18px 18px 96px
+      align-items: start
+      mediaquery:
+        "(max-width: 800px)":
+          grid-template-columns: minmax(0,1fr)
+          grid-template-areas: |
+            "left" "mid" "right" "now"
+          grid-gap: 12px
+          padding: 12px 12px 96px
+        "(max-width: 1100px)":
+          grid-template-columns: minmax(0,1fr) minmax(0,1fr)
+          grid-template-areas: |
+            "left mid"
+            "right mid"
+          grid-gap: 14px
+          padding: 14px 14px 96px
+    cards:
+
+      # ######################################################################
+      # LEFT COLUMN: hero, spending
+      # ######################################################################
+      - type: custom:layout-card
+        view_layout: { grid-area: left, align-self: start }
+        layout_type: custom:grid-layout
+        layout: &col
+          grid-template-columns: minmax(0,1fr)
+          grid-auto-rows: max-content
+          align-items: start
+          grid-gap: 18px
+          margin: 0
+          padding: 0
+          mediaquery:
+            "(max-width: 800px)": { grid-gap: 12px }
+            "(max-width: 1100px)": { grid-gap: 14px }
+        cards:
+
+          # ================= HERO: now playing + remote keys =================
+          - type: custom:button-card
+            template: glass
+            entity: media_player.bedroom_fire_tv
+            triggers_update: [media_player.music_speaker, light.bedroom_lights, input_boolean.kodi_menu, sensor.kodi_menu]
+            show_icon: false
+            show_name: false
+            show_state: false
+            tap_action: { action: more-info }
+            styles:
+              card:
+                - padding: 0
+                - overflow: hidden
+                - background: var(--nc-hero)
+                - color: var(--nc-hero-ink)
+              grid:
+                - grid-template-areas: '"rgb" "body" "keys" "menu"'
+                - grid-template-rows: 6px auto auto auto
+              custom_fields:
+                body: [ padding: 16px 18px 6px, justify-self: start, text-align: left, width: 100%, box-sizing: border-box ]
+                keys: [ padding: 4px 18px 18px, width: 100%, box-sizing: border-box ]
+                # Kodi pick menu: only rendered while input_boolean.kodi_menu is on (script.kodi_open).
+                menu:
+                  - padding: 0 18px 18px
+                  - width: 100%
+                  - box-sizing: border-box
+                  - display: "[[[ return states['input_boolean.kodi_menu'] && states['input_boolean.kodi_menu'].state === 'on' ? 'block' : 'none'; ]]]"
+            custom_fields:
+              rgb: '<div style="height:6px;background:linear-gradient(90deg,#ff3d3d,#ffb800,#4dff5c,#00d9ff,#7b61ff,#ff3dd4)"></div>'
+              body: >
+                [[[
+                  var list = ['media_player.bedroom_fire_tv','media_player.music_speaker'];
+                  var e = null; for (var i=0;i<list.length;i++){ var c = states[list[i]]; if (c && c.state === 'playing'){ e = c; break; } }
+                  var tv = states['media_player.bedroom_fire_tv']; var a = e ? e.attributes : {};
+                  var tvOff = !tv || ['unavailable','off','standby','unknown'].includes(tv.state);
+                  var tag = e ? 'BEDROOM · ' + (e.entity_id.includes('fire_tv') ? (a.app_name || 'Fire TV') : (a.friendly_name || 'Music')).toUpperCase() : 'BEDROOM · TV';
+                  var title = e ? 'Now playing · ' + (a.media_title || a.app_name || 'Playing') : (tvOff ? 'TV is off' : 'Nothing playing');
+                  var sub = e ? [a.media_artist || a.media_series_title || '', a.media_duration ? Math.round((a.media_duration - (a.media_position||0))/60) + ' min left' : ''].filter(Boolean).join(' · ')
+                              : (tvOff ? 'Tap power to wake the Fire TV' : (tv.attributes.app_name || 'Fire TV') + ' · ' + tv.state);
+                  return '<div class="tag">' + tag + '</div><div class="mid" style="margin-top:6px">' + title + '</div><div class="muted">' + (sub || '&nbsp;') + '</div>';
+                ]]]
+              keys:
+                card:
+                  type: custom:layout-card
+                  layout_type: custom:grid-layout
+                  layout: { grid-template-columns: "repeat(6, 40px)", grid-gap: 10px, margin: 0, padding: 0, justify-content: start }
+                  cards:
+                    - { type: custom:button-card, template: remote_key, icon: mdi:power, variables: { color: var(--neon-orange) },
+                        tap_action: { action: call-service, service: media_player.toggle, target: { entity_id: media_player.bedroom_fire_tv } },
+                        hold_action: { action: more-info, entity: remote.bedroom_fire_tv } }
+                    - { type: custom:button-card, template: remote_key, icon: mdi:home,
+                        tap_action: { action: call-service, service: remote.send_command, target: { entity_id: remote.bedroom_fire_tv }, data: { command: HOME } } }
+                    - { type: custom:button-card, template: remote_key, icon: mdi:arrow-left,
+                        tap_action: { action: call-service, service: remote.send_command, target: { entity_id: remote.bedroom_fire_tv }, data: { command: BACK } } }
+                    - { type: custom:button-card, template: remote_key, icon: mdi:play-pause, variables: { color: var(--neon-pink) },
+                        tap_action: { action: call-service, service: media_player.media_play_pause, target: { entity_id: media_player.bedroom_fire_tv } } }
+                    - { type: custom:button-card, template: remote_key, icon: mdi:kodi, variables: { color: "#06131b", bg: var(--grad-cyan) },
+                        tap_action: { action: call-service, service: script.kodi_open } }
+                    - { type: custom:button-card, template: remote_key, icon: mdi:youtube, variables: { color: "#ffffff", bg: "linear-gradient(160deg,#ff5c5c,#e00000)" },
+                        tap_action: { action: call-service, service: script.tv_app, data: { app: com.amazon.firetv.youtube } } }
+              # Kodi pick menu (see packages/media.yaml). One chip per item; empty slots stay hidden.
+              menu:
+                card:
+                  type: custom:layout-card
+                  layout_type: custom:grid-layout
+                  layout: { grid-template-columns: "1fr 1fr", grid-gap: 8px, margin: 0, padding: 0 }
+                  cards:
+                    - type: custom:button-card
+                      template: kodi_pick
+                      variables: { idx: -1 }
+                      view_layout: { grid-column: "1 / -1" }
+                    - type: custom:button-card
+                      template: kodi_pick
+                      variables: { idx: 0 }
+                    - type: custom:button-card
+                      template: kodi_pick
+                      variables: { idx: 1 }
+                    - type: custom:button-card
+                      template: kodi_pick
+                      variables: { idx: 2 }
+                    - type: custom:button-card
+                      template: kodi_pick
+                      variables: { idx: 3 }
+
+          # ================= GRAB TO NAS: debrid link -> Sonarr =================
+          # packages/grab.yaml. Paste a link from Nuvio (Torrentio /resolve/realdebrid/...,
+          # Sooti, HD Hub) and tap Grab. The NAS downloads it and hands it to Sonarr's
+          # ManualImport. Quality is picked by hand on purpose: those packs ship files with
+          # no quality in the name, so Sonarr would read a 45 GB UHD remux as HDTV-720p.
+          - type: custom:button-card
+            template: glass
+            entity: sensor.grab_status
+            triggers_update: [sensor.grab_status, sensor.grab_summary, input_text.grab_url, input_select.grab_quality]
+            show_icon: false
+            show_name: false
+            tap_action: { action: none }
+            styles:
+              card: [ pointer-events: auto ]
+              grid: [ grid-template-areas: '"h" "f" "b" "s"', grid-template-columns: "minmax(0,1fr)" ]
+              custom_fields:
+                h: [ width: 100%, text-align: left ]
+                f: [ width: 100% ]
+                b: [ width: 100%, margin-top: 10px ]
+                s: [ width: 100%, margin-top: 10px, text-align: left ]
+            custom_fields:
+              h: >
+                [[[
+                  var s = entity ? entity.state : 'idle';
+                  var col = { downloading: '#00e5ff', imported: '#8fc31f', failed: '#ff4f4f', offline: '#ff9f43' }[s] || '';
+                  var dot = { downloading: '● running', imported: '● imported', failed: '● failed', offline: '○ NAS offline' }[s] || '○ idle';
+                  return '<div class="row between" style="margin-bottom:10px"><b style="font-size:14px">Grab to NAS</b>'
+                       + '<span class="muted" style="' + (col ? 'color:' + col + ';font-weight:700' : '') + '">' + dot + '</span></div>';
+                ]]]
+              f:
+                card:
+                  type: entities
+                  entities:
+                    - { entity: input_text.grab_url, name: Link, icon: mdi:link-variant }
+                    - { entity: input_select.grab_quality, name: Quality, icon: mdi:quality-high }
+                  card_mod:
+                    style: |
+                      ha-card { background: none; border: none; box-shadow: none; padding: 0; }
+                      .card-content { padding: 0 !important; }
+                      ha-textfield { --mdc-text-field-fill-color: var(--nc-surface-2);
+                                     --mdc-text-field-idle-line-color: transparent;
+                                     --mdc-text-field-hover-line-color: transparent;
+                                     --mdc-shape-small: 14px;
+                                     --mdc-typography-subtitle1-font-size: 12px; }
+              b:
+                card:
+                  type: custom:layout-card
+                  layout_type: custom:grid-layout
+                  layout: { grid-template-columns: "repeat(2, minmax(0,1fr))", grid-gap: 8px, margin: 0, padding: 0 }
+                  cards:
+                    - { type: custom:button-card, template: chip, name: Grab, icon: mdi:download,
+                        styles: { card: [ padding: 9px 6px ] }, variables: { color: var(--neon-cyan) },
+                        tap_action: { action: call-service, service: script.grab_start } }
+                    - { type: custom:button-card, template: chip, name: Cancel, icon: mdi:close-octagon,
+                        styles: { card: [ padding: 9px 6px ] }, variables: { color: var(--neon-orange) },
+                        tap_action: { action: call-service, service: script.grab_cancel } }
+              s: >
+                [[[
+                  var a   = (states['sensor.grab_status'] || { attributes: {} }).attributes || {};
+                  var st  = (states['sensor.grab_status'] || { state: 'idle' }).state;
+                  var sum = ((states['sensor.grab_summary'] || { state: '' }).state || '').trim();
+                  var pct = Number(a.pct) || 0;
+                  var bar = st === 'downloading'
+                    ? '<div style="height:4px;border-radius:999px;background:var(--nc-surface-2);overflow:hidden;margin-top:7px">'
+                      + '<div style="height:100%;width:' + pct + '%;background:var(--neon-cyan)"></div></div>'
+                    : '';
+                  var file = a.file ? '<div class="muted ell" style="font-size:11px;margin-top:2px">' + a.file + '</div>' : '';
+                  return '<div style="font-size:12px;font-weight:600">' + (sum || 'Idle') + '</div>' + file + bar;
+                ]]]
+
+          # ================= SPENDING: gradient bars, insight, coming up, card dues, recent =================
+          # Below the chart everything comes from sensor.spend_feed (spendparse GET /feed): one LLM sentence a day,
+          # predicted renewals, credit-card dues parsed from SMS, and the last 4 transactions as tappable rows
+          # (tap = next category, hold = mark reimbursed).
+          - type: custom:button-card
+            template: glass
+            entity: input_number.spent_this_month
+            triggers_update: [input_number.spent_food, input_number.spent_subs, input_number.spent_travel, input_number.spent_shopping, input_number.spent_other, sensor.spend_feed]
+            show_icon: false
+            show_name: false
+            show_state: false
+            styles:
+              grid: [ grid-template-areas: '"b" "m"', grid-template-columns: "minmax(0,1fr)" ]
+              custom_fields: { b: [ width: 100%, text-align: left ], m: [ width: 100%, min-width: 0 ] }
+            custom_fields:
+              m:
+                card:
+                  type: custom:layout-card
+                  layout_type: custom:grid-layout
+                  layout: { grid-template-columns: minmax(0,1fr), grid-gap: 0, margin: 0, padding: 0 }
+                  cards:
+                    - { type: custom:button-card, template: txn_row, variables: { i: 0 } }
+                    - { type: custom:button-card, template: txn_row, variables: { i: 1 } }
+                    - { type: custom:button-card, template: txn_row, variables: { i: 2 } }
+                    - { type: custom:button-card, template: txn_row, variables: { i: 3 } }
+              b: >
+                [[[
+                  var v = (id) => Number((states[id]||{state:0}).state)||0;
+                  var month = new Date().toLocaleDateString('en-GB',{month:'long'});
+                  var cols = ['#ffb347','#ff5c8a','#9d7bff','#4fd7ff','#c6f04a'];
+                  var cats = [['Food','sensor','input_number.spent_food','linear-gradient(180deg,#ffb347,#ff8a1e)'],['Subs','','input_number.spent_subs','linear-gradient(180deg,#ff5c8a,#ff2d6f)'],['Rent','','input_number.spent_other','linear-gradient(180deg,#9d7bff,#6a3dff)'],['Travel','','input_number.spent_travel','linear-gradient(180deg,#4fd7ff,#1fa8ff)'],['Shop','','input_number.spent_shopping','linear-gradient(180deg,#c6f04a,#8fc31f)']];
+                  var vals = cats.map(c => v(c[2])); var max = Math.max.apply(null, vals.concat([1])); var total = vals.reduce((a,b)=>a+b,0);
+                  var bars = cats.map((c,i) => { var h = Math.max(6, Math.round(110 * vals[i] / max)); var top = vals[i] === max && max > 0 ? '<span class="tip">₹' + Math.round(vals[i]).toLocaleString('en-IN') + '</span>' : '';
+                    return '<div class="bcol">' + top + '<i style="height:' + h + 'px;background:' + c[3] + '"></i></div>'; }).join('');
+                  var labels = cats.map((c,i) => '<div class="bl"><span class="dot" style="background:' + cols[i] + '"></span>' + c[0] + '</div>').join('');
+                  var budget = v('input_number.budget_month') || 1;
+                  var empty = total === 0 ? '<div class="empty"><ha-icon icon="mdi:message-text-outline" style="--mdc-icon-size:22px"></ha-icon><div>No spending logged yet</div><div class="muted">Waiting for the first bank SMS</div></div>' : '';
+                  var rs = (n) => '₹' + Math.round(n).toLocaleString('en-IN');
+                  var MON = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+                  var dm = (d) => { var m = /^(\d{4})-(\d{2})-(\d{2})/.exec(d || ''); return m ? Number(m[3]) + ' ' + MON[Number(m[2]) - 1] : ''; };
+                  var cap = (t) => t ? t.charAt(0).toUpperCase() + t.slice(1) : '';
+                  var f = (states['sensor.spend_feed']||{}).attributes||{};
+                  var ins = (f.insight||{}).text || '';
+                  var up = (f.coming_up||[]).slice(0,5).map(x => '<span class="pill" style="gap:5px"><ha-icon icon="' + (x.bill ? 'mdi:flash' : 'mdi:autorenew') + '" style="--mdc-icon-size:13px;color:var(--neon-pink)"></ha-icon>' + (x.bill ? cap(x.bill) : x.merchant) + ' <span class="muted" style="font-size:11px">' + dm(x.date) + '</span> ' + rs(x.amount) + '</span>').join('');
+                  var soon = (d) => { var t = (new Date(d + 'T00:00:00') - new Date()) / 864e5; return t < 3 ? 'color:var(--neon-orange);font-weight:700' : ''; };
+                  var cards = (f.cards||[]).map(x => '<div class="crow"><span class="ico" style="background:#4fd7ff22;color:#4fd7ff"><ha-icon icon="mdi:credit-card-outline" style="--mdc-icon-size:16px"></ha-icon></span><b>' + x.bank + '</b><span class="muted">' + (x.last ? '··' + x.last : '') + '</span><span class="grow"></span><span class="muted" style="' + soon(x.due_date) + '">' + (x.due_date ? 'by ' + dm(x.due_date) : '') + '</span><b class="amt">' + rs(x.due) + '</b></div>').join('');
+                  var sec = (t) => '<div class="tag" style="margin:14px 0 6px">' + t + '</div>';
+                  return '<div class="row between" style="margin-bottom:10px"><b style="font-size:14px">Spending</b><span class="muted">' + month + ' · ' + rs(total) + ' of ' + rs(budget) + '</span></div>'
+                    + '<div class="bars" style="position:relative">' + bars + empty + '</div>'
+                    + '<div class="blabels">' + labels + '</div>'
+                    + (ins ? '<div class="ins"><ha-icon icon="mdi:creation" style="--mdc-icon-size:14px;color:var(--neon-pink);flex:none"></ha-icon><span>' + ins + '</span></div>' : '')
+                    + (up ? sec('Coming up') + '<div class="pills">' + up + '</div>' : '')
+                    + (cards ? sec('Card dues') + cards : '')
+                    + sec('Recent');
+                ]]]
+            extra_styles: |
+              .tag { font-size:10px; text-transform:uppercase; letter-spacing:1px; color:var(--nc-muted); font-weight:700; }
+              .mid { font-size:22px; font-weight:700; letter-spacing:-.5px; line-height:1.15; }
+              .muted { color:var(--nc-muted); font-size:12px; }
+              .row { display:flex; align-items:center; gap:12px; }
+              .row.between > .muted { min-width:0; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+              .between { justify-content:space-between; }
+              .grow { flex:1; min-width:0; }
+              .pill { display:inline-flex; align-items:center; gap:6px; padding:5px 10px; border-radius:999px; font-size:11px; font-weight:700; background:var(--nc-surface-2); color:var(--primary-text-color); }
+              .dot { width:9px; height:9px; border-radius:50%; display:inline-block; flex:none; }
+              .bar { height:6px; border-radius:999px; background:var(--nc-track); overflow:hidden; display:block; }
+              .bar i { display:block; height:100%; border-radius:999px; }
+              .item { display:flex; align-items:center; gap:10px; font-size:13px; min-width:0; }
+              .item .ico { width:34px; height:34px; border-radius:12px; display:grid; place-items:center; flex:none; }
+              .item .grow > div { white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+              .stat4 { display:grid; grid-template-columns:1fr 1fr; gap:12px 14px; }
+              .stat4 .st { border-left:3px solid var(--c); padding-left:10px; min-width:0; }
+              .stat4 .mid { font-size:20px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+              .urow { display:flex; align-items:center; gap:10px; font-size:13px; margin:7px 0; }
+              .urow .bar { width:80px; }
+              ha-icon { margin:0; }
+              .bar { height: 3px; border-radius: 999px; background: rgba(255,255,255,.12); overflow: hidden; }
+              .bars { display:grid; grid-template-columns:repeat(5,1fr); align-items:end; gap:10px; height:146px; padding:26px 6px 0; border-bottom:1px dashed var(--nc-track); }
+              .bcol { display:flex; flex-direction:column; align-items:center; justify-content:flex-end; gap:8px; position:relative; height:100%; }
+              .bcol i { display:block; width:34px; border-radius:10px 10px 4px 4px; box-shadow:0 8px 20px rgba(0,0,0,.3); }
+              .blabels { display:grid; grid-template-columns:repeat(5,1fr); gap:10px; padding:8px 6px 0; margin-bottom:12px; }
+              .bl { display:flex; align-items:center; justify-content:center; gap:5px; font-size:11px; font-weight:600; color:var(--primary-text-color); white-space:nowrap; }
+              .bl .dot { width:7px; height:7px; }
+              .tip { background:var(--nc-surface-2); color:var(--primary-text-color); font-size:11px; font-weight:700; padding:3px 8px; border-radius:999px; }
+              .ins { display:flex; gap:8px; align-items:flex-start; font-size:12px; line-height:1.4; white-space:normal; text-align:left; color:var(--primary-text-color); background:var(--nc-surface-2); border-radius:12px; padding:8px 10px; margin-top:12px; }
+              .ins span { white-space:normal; overflow-wrap:anywhere; }
+              .pills { display:flex; flex-wrap:wrap; gap:6px; }
+              .pills .pill { font-weight:600; }
+              .crow { display:flex; align-items:center; gap:8px; font-size:13px; padding:5px 0; min-width:0; }
+              .crow .ico { width:28px; height:28px; border-radius:9px; display:grid; place-items:center; flex:none; }
+              .crow .amt { font-variant-numeric:tabular-nums; }
+              .empty { position:absolute; inset:0; display:grid; place-content:center; text-align:center; gap:4px; color:var(--nc-muted); font-size:13px; }
+              .empty ha-icon { margin:0 auto; }
+
+      # ######################################################################
+      # MIDDLE COLUMN: weather, overhead (planes + satellites), gaming PC, body, Mac
+      # ######################################################################
+      - type: custom:layout-card
+        view_layout: { grid-area: mid, align-self: start }
+        layout_type: custom:grid-layout
+        layout: *col
+        cards:
+
+          # ================= WEATHER (custom, like the mockup) =================
+          - type: custom:button-card
+            template: glass
+            entity: weather.home
+            triggers_update: [sensor.forecast_daily]
+            show_icon: false
+            show_name: false
+            show_state: false
+            tap_action: { action: more-info }
+            styles:
+              grid: [ grid-template-areas: '"w"', grid-template-columns: "minmax(0,1fr)" ]
+              custom_fields: { w: [ width: 100%, text-align: left ] }
+            custom_fields:
+              w: >
+                [[[
+                  var a = entity ? entity.attributes : {};
+                  var fc = (states['sensor.forecast_daily'] && states['sensor.forecast_daily'].attributes.forecast) || [];
+                  var cond = (c) => ({ 'sunny':'Sunny','clear-night':'Clear','partlycloudy':'Partly cloudy','cloudy':'Cloudy','rainy':'Rain','pouring':'Heavy rain','lightning':'Storm','lightning-rainy':'Storm','snowy':'Snow','fog':'Fog','windy':'Windy','hail':'Hail' }[c] || (c || '—'));
+                  var mdi = (c) => ({ 'sunny':'mdi:weather-sunny','clear-night':'mdi:weather-night','partlycloudy':'mdi:weather-partly-cloudy','cloudy':'mdi:weather-cloudy','rainy':'mdi:weather-rainy','pouring':'mdi:weather-pouring','lightning':'mdi:weather-lightning','lightning-rainy':'mdi:weather-lightning-rainy','snowy':'mdi:weather-snowy','fog':'mdi:weather-fog','windy':'mdi:weather-windy','hail':'mdi:weather-hail','exceptional':'mdi:alert-circle-outline' }[c] || 'mdi:weather-partly-cloudy');
+                  var tint = { 'sunny':'#ff9f2e','clear-night':'#7b61ff','rainy':'#3fe3ff','pouring':'#3fe3ff','lightning':'#9d7bff','lightning-rainy':'#9d7bff','cloudy':'#aab2c5','partlycloudy':'#ffd24d','snowy':'#e8f4ff','fog':'#aab2c5','windy':'#b5e21c' }[entity ? entity.state : ''] || '#ff9f2e';
+                  var d = new Date(); var today = d.toLocaleDateString('en-GB',{day:'numeric',month:'short'});
+                  var hi = fc[0] ? Math.round(fc[0].temperature) : Math.round(a.temperature||0), lo = fc[0] && fc[0].templow !== undefined ? Math.round(fc[0].templow) : null;
+                  var row = (f, label) => f ? '<div class="frow"><span class="fi"><ha-icon icon="' + mdi(f.condition) + '" style="--mdc-icon-size:22px;color:var(--nc-muted)"></ha-icon></span><div><div class="muted">' + label + '</div><b>' + cond(f.condition) + '</b></div><div class="ft"><b>' + Math.round(f.temperature) + '°</b>/' + (f.templow !== undefined ? Math.round(f.templow) : '–') + '°</div></div>' : '';
+                  var dayName = (f) => f ? new Date(f.datetime).toLocaleDateString('en-GB',{weekday:'long'}) : '';
+                  return '<div class="row between"><b style="font-size:14px">Weather</b><span class="muted">' + (hass.config.location_name || 'Home') + ' · ' + today + '</span></div>'
+                    + '<div class="wtop"><div class="blob" style="background:radial-gradient(circle closest-side, color-mix(in srgb,' + tint + ' 34%, transparent) 0%, color-mix(in srgb,' + tint + ' 12%, transparent) 55%, transparent 100%);color:' + tint + '"><ha-icon icon="' + mdi(entity ? entity.state : '') + '"></ha-icon></div><div style="text-align:right"><div class="big">' + Math.round(a.temperature||0) + '<span class="lo">/' + (lo !== null ? lo : hi) + '°</span></div><div class="muted">' + cond(entity ? entity.state : '') + ' now</div></div></div>'
+                    + row(fc[1], 'Tomorrow') + row(fc[2], dayName(fc[2]));
+                ]]]
+            extra_styles: |
+              .tag { font-size:10px; text-transform:uppercase; letter-spacing:1px; color:var(--nc-muted); font-weight:700; }
+              .mid { font-size:22px; font-weight:700; letter-spacing:-.5px; line-height:1.15; }
+              .muted { color:var(--nc-muted); font-size:12px; }
+              .row { display:flex; align-items:center; gap:12px; }
+              .row.between > .muted { min-width:0; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+              .between { justify-content:space-between; }
+              .grow { flex:1; min-width:0; }
+              .pill { display:inline-flex; align-items:center; gap:6px; padding:5px 10px; border-radius:999px; font-size:11px; font-weight:700; background:var(--nc-surface-2); color:var(--primary-text-color); }
+              .dot { width:9px; height:9px; border-radius:50%; display:inline-block; flex:none; }
+              .bar { height:6px; border-radius:999px; background:var(--nc-track); overflow:hidden; display:block; }
+              .bar i { display:block; height:100%; border-radius:999px; }
+              .item { display:flex; align-items:center; gap:10px; font-size:13px; min-width:0; }
+              .item .ico { width:34px; height:34px; border-radius:12px; display:grid; place-items:center; flex:none; }
+              .item .grow > div { white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+              .stat4 { display:grid; grid-template-columns:1fr 1fr; gap:12px 14px; }
+              .stat4 .st { border-left:3px solid var(--c); padding-left:10px; min-width:0; }
+              .stat4 .mid { font-size:20px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+              .urow { display:flex; align-items:center; gap:10px; font-size:13px; margin:7px 0; }
+              .urow .bar { width:80px; }
+              ha-icon { margin:0; }
+              .bar { height: 3px; border-radius: 999px; background: rgba(255,255,255,.12); overflow: hidden; }
+              .wtop { display:flex; align-items:center; justify-content:space-between; gap:12px; margin:6px 0 10px; }
+              .blob { width:104px; height:104px; margin:-6px 0; display:grid; place-items:center; --mdc-icon-size:50px; }
+              .big { font-size:44px; font-weight:700; letter-spacing:-1.5px; line-height:1; }
+              .lo { font-size:20px; color:var(--nc-muted); font-weight:600; letter-spacing:0; }
+              .frow { display:flex; align-items:center; gap:10px; font-size:13px; margin:8px 0; }
+              .frow .fi { font-size:18px; width:26px; text-align:center; }
+              .frow > div:nth-child(2) { flex:1; line-height:1.2; }
+              .frow b { font-size:14px; }
+              .ft { color:var(--nc-muted); font-size:13px; }
+              .ft b { color:var(--primary-text-color); }
+
+          # ================= OVERHEAD: planes + satellites above the house =================
+          # sensor.planes_overhead / sensor.satellites_overhead come from packages/overhead.yaml
+          # (bin/overhead.py). Tap = Flightradar24 around home, hold = satellite details.
+          - type: custom:button-card
+            template: glass
+            entity: sensor.satellites_overhead
+            triggers_update: [sensor.planes_overhead, sensor.satellites_overhead]
+            show_icon: false
+            show_name: false
+            show_state: false
+            tap_action:
+              action: url
+              url_path: "[[[ var z = states['zone.home']; return z ? 'https://www.flightradar24.com/' + z.attributes.latitude.toFixed(3) + ',' + z.attributes.longitude.toFixed(3) + '/9' : 'https://www.flightradar24.com/'; ]]]"
+            hold_action: { action: more-info, entity: sensor.satellites_overhead }
+            styles:
+              grid: [ grid-template-areas: '"h" "t" "l"', grid-template-columns: "minmax(0,1fr)" ]
+              custom_fields:
+                h: [ width: 100%, text-align: left ]
+                t: [ width: 100% ]
+                l: [ width: 100%, text-align: left, margin-top: 10px ]
+            custom_fields:
+              h: >
+                [[[
+                  var s = states['sensor.satellites_overhead'], p = states['sensor.planes_overhead'];
+                  var a = s ? s.attributes : {}; var upd = a.updated ? new Date(a.updated) : null;
+                  var meta = (hass.config.location_name || 'Home') + (upd ? ' · ' + upd.toLocaleTimeString('en-GB',{hour:'2-digit',minute:'2-digit'}) : '') + (a.stale || (p && p.attributes.stale) ? ' · offline' : '');
+                  return '<div class="row between" style="margin-bottom:10px"><b style="font-size:14px">Overhead</b><span class="muted">' + meta + '</span></div>';
+                ]]]
+              t: >
+                [[[
+                  var p = states['sensor.planes_overhead'], s = states['sensor.satellites_overhead'];
+                  var pa = p ? p.attributes : {}, sa = s ? s.attributes : {};
+                  var np = p && !isNaN(p.state) ? Number(p.state) : null, ns = s && !isNaN(s.state) ? Number(s.state) : null;
+                  var c = pa.closest;
+                  var psub = np === null ? 'no data yet' : (pa.close ? pa.close + ' right above you' : (c ? 'closest ' + c.dist_km + ' km ' + c.dir : 'none within ' + (pa.radius_km || 100) + ' km'));
+                  var iss = sa.iss, np2 = iss && iss.next_pass;
+                  var issS = iss && iss.el >= 10 ? 'ISS up now' : (np2 && np2.starts_in_min < 120 ? 'ISS in ' + np2.starts_in_min + ' min' : (np2 ? 'ISS ' + new Date(np2.start).toLocaleTimeString('en-GB',{hour:'2-digit',minute:'2-digit'}) : (sa.high || 0) + ' parked'));
+                  var ssub = ns === null ? 'no data yet' : ((sa.starlink || 0) + ' Starlink · ' + issS);
+                  var tile = (grad, ink, icon, n, label, sub) => '<div class="ot" style="background:' + grad + ';color:' + ink + '"><ha-icon icon="' + icon + '" style="--mdc-icon-size:26px;width:26px;height:26px;display:block"></ha-icon><div class="on">' + (n === null ? '–' : n) + '</div><div class="ol">' + label + '</div><div class="os">' + sub + '</div></div>';
+                  return '<div class="ot2">'
+                    + tile('var(--grad-cyan)', '#06131b', 'mdi:airplane', np, np === 1 ? 'plane within 100 km' : 'planes within 100 km', psub)
+                    + tile('var(--grad-purple)', '#ffffff', 'mdi:satellite-variant', ns, ns === 1 ? 'satellite up high' : 'satellites up high', ssub)
+                    + '</div>';
+                ]]]
+              l: >
+                [[[
+                  var p = states['sensor.planes_overhead'], s = states['sensor.satellites_overhead'];
+                  var pa = p ? p.attributes : {}, sa = s ? s.attributes : {};
+                  var out = '';
+                  var row = (icon, col, main, meta, right) => '<div class="orow"><span class="ico" style="background:color-mix(in srgb,' + col + ' 16%, var(--nc-surface-2));color:' + col + '"><ha-icon icon="' + icon + '" style="--mdc-icon-size:18px"></ha-icon></span><div class="grow"><div><b>' + main + '</b>' + (meta ? ' <span class="muted">' + meta + '</span>' : '') + '</div></div><span class="muted" style="white-space:nowrap">' + right + '</span></div>';
+                  (pa.planes || []).slice(0, 3).forEach(function (x) {
+                    var ft = x.alt_ft ? x.alt_ft.toLocaleString('en-IN') + ' ft' : '';
+                    var arrow = x.climb > 0 ? ' ↗' : (x.climb < 0 ? ' ↘' : '');
+                    out += row('mdi:airplane', '#1fa8ff', x.callsign, x.airline || x.type || x.country, x.dist_km + ' km ' + x.dir + (ft ? ' · ' + ft + arrow : ''));
+                  });
+                  var iss = sa.iss;
+                  if (iss && iss.el >= 10) out += row('mdi:rocket-launch', '#ff9f2e', 'ISS', 'over you now', iss.el + '° up · ' + iss.dir);
+                  else if (iss && iss.next_pass) {
+                    var t = new Date(iss.next_pass.start); var m = iss.next_pass.starts_in_min;
+                    var when = m < 60 ? 'in ' + m + ' min' : (m < 1440 ? 'in ' + Math.floor(m / 60) + 'h ' + (m % 60) + 'm' : t.toLocaleDateString('en-GB',{weekday:'short'}));
+                    out += row('mdi:rocket-launch', '#ff9f2e', 'ISS', 'next pass ' + t.toLocaleTimeString('en-GB',{hour:'2-digit',minute:'2-digit'}) + ' · ' + when, 'up to ' + iss.next_pass.max_el + '°');
+                  }
+                  var top = (sa.highest || [])[0];
+                  if (top) out += row('mdi:satellite-variant', '#7b61ff', top.name, 'highest right now', top.el + '° up · ' + top.dir + ' · ' + top.alt_km + ' km');
+                  if (sa.night && sa.lit) out += '<div class="muted" style="margin-top:6px"><ha-icon icon="mdi:eye-outline" style="--mdc-icon-size:14px;vertical-align:-2px;margin-right:4px"></ha-icon>' + sa.lit + ' of them are sunlit — look up, the brighter ones are visible.</div>';
+                  return out;
+                ]]]
+            extra_styles: |
+              .tag { font-size:10px; text-transform:uppercase; letter-spacing:1px; color:var(--nc-muted); font-weight:700; }
+              .muted { color:var(--nc-muted); font-size:12px; }
+              .row { display:flex; align-items:center; gap:12px; }
+              .row.between > .muted { min-width:0; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+              .between { justify-content:space-between; }
+              .grow { flex:1; min-width:0; }
+              .grow > div { white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+              ha-icon { margin:0; }
+              .ot2 { display:grid; grid-template-columns:1fr 1fr; gap:12px; }
+              .ot { border-radius:18px; padding:14px 14px 12px; min-width:0; box-shadow:0 10px 26px rgba(0,0,0,.25); }
+              .ot ha-icon { filter:drop-shadow(0 4px 10px rgba(0,0,0,.25)); }
+              .ot .on { font-size:38px; font-weight:700; letter-spacing:-1.5px; line-height:1; margin-top:8px; }
+              .ot .ol { font-size:12px; font-weight:700; margin-top:6px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+              .ot .os { font-size:11px; opacity:.78; margin-top:2px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+              .orow { display:flex; align-items:center; gap:10px; font-size:13px; margin:7px 0; min-width:0; }
+              .orow .ico { width:32px; height:32px; border-radius:11px; display:grid; place-items:center; flex:none; }
+
+          # ================= GAMING PC =================
+          # Wake chip + Gaming PC tile send a magic packet: replace aa:bb:cc:dd:ee:ff (example) with your PC's MAC.
+          # (Lovelace YAML dashboards do not support !secret, so it stays inline.)
+          - type: custom:button-card
+            template: glass
+            entity: binary_sensor.pc_active
+            triggers_update: [sensor.pc_game_launcher_running, sensor.pc_usage_today, select.pc_game]
+            show_icon: false
+            show_name: false
+            tap_action: { action: more-info }
+            styles:
+              grid: [ grid-template-areas: '"h" "s" "g" "p"', grid-template-columns: "minmax(0,1fr)" ]
+              custom_fields:
+                h: [ width: 100%, text-align: left ]
+                s: [ width: 100%, text-align: left ]
+                g: [ width: 100%, margin-top: 14px ]
+                p: [ width: 100%, margin-top: 8px ]
+            custom_fields:
+              h: >
+                [[[ var on = entity && entity.state === 'on'; return '<div class="row between" style="margin-bottom:10px"><b style="font-size:14px">Gaming PC</b><span class="muted" style="' + (on ? 'color:#8fc31f;font-weight:700' : '') + '">' + (on ? '● online' : '○ offline') + '</span></div>'; ]]]
+              s: >
+                [[[
+                  var st = (id) => (states[id]||{state:'unavailable'}).state; var on = entity && entity.state === 'on';
+                  var riot = ['True','true','on','1'].includes(st('sensor.pc_game_launcher_running'));
+                  var v = Number((states['sensor.pc_usage_today']||{state:0}).state)||0;
+                  var tile = (col, val, lab) => '<div class="st" style="--c:' + col + '"><div class="mid">' + val + '</div><div class="muted">' + lab + '</div></div>';
+                  return '<div class="stat4">' + tile('#b5e21c', Math.floor(v) + 'h ' + Math.round((v%1)*60) + 'm', 'Played today') + tile('#ff4fa3', on ? (riot ? 'Riot' : 'Idle') : '—', 'Running now') + '</div>';
+                ]]]
+              # Game picker: ‹ [ Game · name ] › — arrows step through select.pc_game, the middle opens the full list.
+              g:
+                card:
+                  type: custom:layout-card
+                  layout_type: custom:grid-layout
+                  layout: { grid-template-columns: "36px minmax(0,1fr) 36px", grid-gap: 6px, margin: 0, padding: 0, align-items: center }
+                  cards:
+                    - { type: custom:button-card, template: chip, show_name: false, icon: mdi:chevron-left, variables: { color: var(--nc-muted) },
+                        styles: { card: [ padding: 8px 0 ], grid: [ grid-template-areas: '"i"', grid-template-columns: 1fr ] },
+                        tap_action: { action: call-service, service: select.select_previous, target: { entity_id: select.pc_game } } }
+                    - { type: custom:button-card, template: chip, entity: select.pc_game, icon: mdi:gamepad-variant, variables: { color: var(--neon-purple) },
+                        name: "[[[ var g = states['select.pc_game']; var s = g && !['unknown','unavailable','off'].includes(g.state) ? g.state : 'pick a game'; return '<span style=\"color:var(--nc-muted);font-weight:600\">Game</span> · ' + s; ]]]",
+                        styles: { card: [ background: "color-mix(in srgb, var(--neon-purple) 16%, var(--nc-surface-2))", border: "1px solid color-mix(in srgb, var(--neon-purple) 35%, transparent)" ] },
+                        tap_action: { action: more-info }, hold_action: { action: call-service, service: select.select_next, target: { entity_id: select.pc_game } } }
+                    - { type: custom:button-card, template: chip, show_name: false, icon: mdi:chevron-right, variables: { color: var(--nc-muted) },
+                        styles: { card: [ padding: 8px 0 ], grid: [ grid-template-areas: '"i"', grid-template-columns: 1fr ] },
+                        tap_action: { action: call-service, service: select.select_next, target: { entity_id: select.pc_game } } }
+              p:
+                card:
+                  type: custom:layout-card
+                  layout_type: custom:grid-layout
+                  layout: { grid-template-columns: "repeat(auto-fit, minmax(84px, 1fr))", grid-gap: 8px, margin: 0, padding: 0 }
+                  cards:
+                    - { type: custom:button-card, template: chip, name: Wake, icon: mdi:power, styles: { card: [ padding: 8px 8px ] }, variables: { color: var(--neon-lime) }, tap_action: { action: call-service, service: wake_on_lan.send_magic_packet, data: { mac: "aa:bb:cc:dd:ee:ff" } } }
+                    - { type: custom:button-card, template: chip, name: Launch, icon: mdi:rocket-launch, styles: { card: [ padding: 8px 8px ] }, variables: { color: var(--neon-purple) }, tap_action: { action: call-service, service: script.launch_selected_game } }
+                    - { type: custom:button-card, template: chip, name: Valorant, icon: mdi:crosshairs, styles: { card: [ padding: 8px 8px ] }, variables: { color: var(--neon-pink) }, tap_action: { action: call-service, service: script.start_valorant } }
+
+          # ================= BODY (fitness teaser) =================
+          - type: custom:button-card
+            template: glass
+            show_icon: false
+            show_name: false
+            tap_action: { action: navigate, navigation_path: /dashboard-home/fitness }
+            styles:
+              grid: [ grid-template-areas: '"h" "r"', grid-template-columns: "minmax(0,1fr)" ]
+              custom_fields:
+                h: [ width: 100%, text-align: left ]
+                r: [ width: 100% ]
+            custom_fields:
+              h: '<div class="row between" style="margin-bottom:12px"><b style="font-size:14px">Body</b><span class="muted">today · Fitness →</span></div>'
+              r: >
+                [[[
+                  var v = (id) => { var e = states[id]; return e && !isNaN(Number(e.state)) ? Number(e.state) : null; };
+                  var ring = (label, val, max, unit, col) => {
+                    var p = val === null ? 0 : Math.min(100, Math.round(100*val/max));
+                    var txt = val === null ? '—' : (unit === 'h' ? (val/60).toFixed(1)+'h' : Math.round(val) + unit);
+                    return '<div class="mini"><div class="mr" style="background:conic-gradient('+col+' '+p+'%,var(--nc-track) '+p+'%)"><span>'+txt+'</span></div><div class="muted">'+label+'</div></div>';
+                  };
+                  var goal = v('sensor.garmin_connect_daily_step_goal') || 8000;
+                  return '<div class="minis">' + ring('Steps', v('sensor.garmin_connect_steps'), goal, '', '#b5e21c') + ring('Battery', v('sensor.garmin_connect_body_battery'), 100, '', '#3fe3ff')
+                    + ring('Sleep', v('sensor.garmin_connect_sleep_duration'), 480, 'h', '#7b61ff') + ring('Eaten', v('sensor.nutrition_calories'), v('sensor.nutrition_calorie_goal') || 2200, '', '#ff9f2e') + '</div>'
+                    + (states['sensor.garmin_connect_steps'] ? '' : '<div class="muted" style="margin-top:8px;text-align:center">Connect Garmin in Settings → Integrations</div>');
+                ]]]
+            extra_styles: |
+              .tag { font-size:10px; text-transform:uppercase; letter-spacing:1px; color:var(--nc-muted); font-weight:700; }
+              .mid { font-size:22px; font-weight:700; letter-spacing:-.5px; line-height:1.15; }
+              .muted { color:var(--nc-muted); font-size:12px; }
+              .row { display:flex; align-items:center; gap:12px; }
+              .row.between > .muted { min-width:0; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+              .between { justify-content:space-between; }
+              .grow { flex:1; min-width:0; }
+              .pill { display:inline-flex; align-items:center; gap:6px; padding:5px 10px; border-radius:999px; font-size:11px; font-weight:700; background:var(--nc-surface-2); color:var(--primary-text-color); }
+              .dot { width:9px; height:9px; border-radius:50%; display:inline-block; flex:none; }
+              .bar { height:6px; border-radius:999px; background:var(--nc-track); overflow:hidden; display:block; }
+              .bar i { display:block; height:100%; border-radius:999px; }
+              .item { display:flex; align-items:center; gap:10px; font-size:13px; min-width:0; }
+              .item .ico { width:34px; height:34px; border-radius:12px; display:grid; place-items:center; flex:none; }
+              .item .grow > div { white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+              .stat4 { display:grid; grid-template-columns:1fr 1fr; gap:12px 14px; }
+              .stat4 .st { border-left:3px solid var(--c); padding-left:10px; min-width:0; }
+              .stat4 .mid { font-size:20px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+              .urow { display:flex; align-items:center; gap:10px; font-size:13px; margin:7px 0; }
+              .urow .bar { width:80px; }
+              ha-icon { margin:0; }
+              .bar { height: 3px; border-radius: 999px; background: rgba(255,255,255,.12); overflow: hidden; }
+              .minis { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:6px; }
+              .mini { text-align:center; }
+              .mr { width:60px; height:60px; border-radius:50%; margin:0 auto 6px; display:grid; place-items:center; -webkit-mask:none; }
+              .mr span { width:48px; height:48px; border-radius:50%; background:var(--card-background-color); display:grid; place-items:center; font-size:12px; font-weight:700; }
+              .mini .muted { font-size:10px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+
+          # ================= MAC =================
+          - type: custom:button-card
+            template: glass
+            entity: binary_sensor.mac_online
+            triggers_update: [sensor.mac_status, binary_sensor.mac_antigravity_running, binary_sensor.mac_caffeinated]
+            show_icon: false
+            show_name: false
+            tap_action: { action: more-info, entity: sensor.mac_status }
+            styles:
+              grid: [ grid-template-areas: '"h" "s" "p"', grid-template-columns: "minmax(0,1fr)" ]
+              custom_fields:
+                h: [ width: 100%, text-align: left ]
+                s: [ width: 100%, text-align: left ]
+                p: [ width: 100%, margin-top: 14px ]
+            custom_fields:
+              h: >
+                [[[ var ms = states['sensor.mac_status'] ? states['sensor.mac_status'].attributes : {}; var on = entity && entity.state === 'on';
+                    return '<div class="row between" style="margin-bottom:10px"><b style="font-size:14px">Mac</b><span class="muted">' + (on ? 'online' : 'offline') + '</span></div>'; ]]]
+              s: >
+                [[[
+                  var ms = states['sensor.mac_status'] ? states['sensor.mac_status'].attributes : {};
+                  var on = (id) => states[id] && states[id].state === 'on';
+                  var n = Number(ms.active_sessions !== undefined ? ms.active_sessions : (ms.session_count || 0));
+                  var tile = (col, val, lab) => '<div class="st" style="--c:' + col + '"><div class="mid">' + val + '</div><div class="muted">' + lab + '</div></div>';
+                  return '<div class="stat4">' + tile('#b5e21c', n, n === 1 ? 'Claude session' : 'Claude sessions') + tile('#3fe3ff', on('binary_sensor.mac_antigravity_running') ? 'Open' : 'Closed', 'Antigravity')
+                    + tile('#ff9f2e', on('binary_sensor.mac_caffeinated') ? 'Awake' : 'Can sleep', 'Power') + tile('#ff4fa3', (ms.load || '?'), 'Load · disk ' + (ms.disk_used_pct || '?') + '%') + '</div>';
+                ]]]
+              p:
+                card:
+                  type: custom:layout-card
+                  layout_type: custom:grid-layout
+                  layout: { grid-template-columns: "repeat(auto-fit, minmax(140px, 1fr))", grid-gap: 8px, margin: 0, padding: 0 }
+                  cards:
+                    - { type: custom:button-card, template: chip, name: Start, icon: mdi:play, variables: { color: var(--neon-lime) }, tap_action: { action: call-service, service: script.claude_rc_start } }
+                    - { type: custom:button-card, template: chip, name: Stop all, icon: mdi:stop, variables: { color: var(--neon-pink) }, tap_action: { action: call-service, service: script.mac_stop_all_claude, confirmation: { text: "Stop all Claude sessions on the Mac?" } } }
+                    - { type: custom:button-card, template: chip, icon: mdi:coffee, variables: { color: var(--neon-orange) },
+                        name: "[[[ return states['binary_sensor.mac_caffeinated'] && states['binary_sensor.mac_caffeinated'].state === 'on' ? 'Let sleep' : 'Keep awake'; ]]]",
+                        tap_action: { action: call-service, service: "[[[ return states['binary_sensor.mac_caffeinated'] && states['binary_sensor.mac_caffeinated'].state === 'on' ? 'script.mac_decaffeinate' : 'script.mac_caffeinate'; ]]]" } }
+                    - { type: custom:button-card, template: chip, name: Lock, icon: mdi:lock, variables: { color: var(--nc-muted) }, tap_action: { action: call-service, service: script.mac_lock } }
+
+      # ######################################################################
+      # RIGHT COLUMN: screen time knob, devices, today tiles
+      # ######################################################################
+      - type: custom:layout-card
+        view_layout: { grid-area: right, align-self: start }
+        layout_type: custom:grid-layout
+        layout: *col
+        cards:
+
+          # ================= DIGITAL USAGE: big knob + two stats =================
+          - type: custom:button-card
+            template: knob
+            entity: sensor.digital_usage_today
+            triggers_update: [sensor.tv_usage_today, sensor.phone_usage_today, sensor.mac_usage_today, sensor.pc_usage_today]
+            variables:
+              title: Screen time
+              pct: "[[[ return Math.min(100, Math.round(100 * Number(entity.state) / 10)); ]]]"
+              value: "[[[ return Number(entity.state).toFixed(1) + 'h'; ]]]"
+              sub: "[[[ var t = Number((states['sensor.digital_usage_week']||{state:0}).state)||0; return 'today · ' + t.toFixed(0) + 'h this week'; ]]]"
+              stat_a_value: "[[[ return Number((states['sensor.tv_usage_today']||{state:0}).state).toFixed(1) + 'h'; ]]]"
+              stat_a_label: TV
+              stat_b_value: "[[[ return Number((states['sensor.phone_usage_today']||{state:0}).state).toFixed(1) + 'h'; ]]]"
+              stat_b_label: Phone
+              rows: >
+                [[[
+                  var f = (id, name, col) => { var v = Number((states[id]||{state:0}).state)||0; var p = Math.min(100, Math.round(100*v/5));
+                    return '<div class="urow"><span class="dot" style="background:'+col+'"></span><span class="grow">'+name+'</span><span class="bar"><i style="width:'+p+'%;background:'+col+'"></i></span><span class="muted">'+v.toFixed(1)+'h</span></div>'; };
+                  return f('sensor.mac_usage_today','Mac','#ff9f2e') + f('sensor.pc_usage_today','Gaming PC','#b5e21c');
+                ]]]
+
+          # ================= DEVICES: tiles with toggles =================
+          - type: custom:button-card
+            template: glass
+            show_icon: false
+            show_name: false
+            triggers_update: [light.bedroom_lights, binary_sensor.mac_online, media_player.bedroom_soundbar, binary_sensor.pc_active]
+            styles:
+              grid: [ grid-template-areas: '"h" "g"', grid-template-columns: "minmax(0,1fr)" ]
+              custom_fields:
+                h: [ width: 100%, text-align: left ]
+                g: [ width: 100% ]
+            custom_fields:
+              h: >
+                [[[ var ids = ['light.bedroom_lights','binary_sensor.mac_online','media_player.bedroom_soundbar','binary_sensor.pc_active'];
+                    var n = ids.filter(id => states[id] && ['on','playing','paused','idle'].includes(states[id].state)).length;
+                    return '<div class="row between" style="margin-bottom:10px"><b style="font-size:14px">My devices</b><span class="muted">' + n + ' of ' + ids.length + ' on</span></div>'; ]]]
+              g:
+                card:
+                  type: grid
+                  columns: 2
+                  square: false
+                  cards:
+                    - type: custom:button-card
+                      template: device_tile
+                      entity: light.bedroom_lights
+                      name: Lights
+                      icon: mdi:lightbulb
+                      label: "[[[ return entity && entity.state === 'on' ? (entity.attributes.brightness ? Math.round(entity.attributes.brightness/2.55)+'% bright' : 'on') : 'off'; ]]]"
+                      variables: { grad: var(--grad-orange), ink: "#1b1206" }
+                    - type: custom:button-card
+                      template: device_tile
+                      entity: binary_sensor.mac_online
+                      name: MacBook
+                      icon: mdi:laptop
+                      label: "[[[ var s = states['sensor.mac_status']; return s ? 'uptime ' + Math.floor(s.attributes.uptime_hours/24) + 'd ' + (s.attributes.uptime_hours % 24) + 'h' : ''; ]]]"
+                      tap_action: { action: more-info, entity: sensor.mac_status }
+                      variables: { grad: var(--grad-cyan), ink: "#06131b" }
+                    - type: custom:button-card
+                      template: device_tile
+                      entity: media_player.bedroom_soundbar
+                      name: Sound bar
+                      icon: mdi:soundbar
+                      label: "[[[ return entity && entity.attributes.volume_level !== undefined ? 'vol ' + Math.round(entity.attributes.volume_level*100) + '%' : ''; ]]]"
+                      variables: { grad: var(--grad-cyan), ink: "#06131b" }
+                    - type: custom:button-card
+                      template: device_tile
+                      entity: binary_sensor.pc_active
+                      name: Gaming PC
+                      icon: mdi:gamepad-variant
+                      label: "[[[ var v = Number((states['sensor.pc_usage_today']||{state:0}).state)||0; return entity && entity.state === 'on' ? 'on · ' + v.toFixed(1) + 'h today' : 'last: ' + v.toFixed(1) + 'h today'; ]]]"
+                      tap_action: { action: call-service, service: wake_on_lan.send_magic_packet, data: { mac: "aa:bb:cc:dd:ee:ff" } }
+                      variables: { grad: var(--grad-lime), ink: "#12200a" }
+
+          # ================= TODAY: to-do list + status strip =================
+          # Needs a Local To-do list called "Today" (Settings -> Devices & services -> Add integration
+          # -> Local To-do -> name "Today") which creates todo.today. Until then the card shows a hint.
+          - type: custom:button-card
+            template: glass
+            entity: todo.today
+            triggers_update: [sensor.phone_battery_level, sensor.phone_battery_state, sensor.mac_battery, sensor.grab_status]
+            show_icon: false
+            show_name: false
+            show_state: false
+            styles:
+              grid: [ grid-template-areas: '"h" "st" "l" "hint"', grid-template-columns: "minmax(0,1fr)" ]
+              custom_fields:
+                h: [ width: 100%, text-align: left ]
+                st: [ width: 100%, text-align: left ]
+                l: [ width: 100%, text-align: left, margin-top: 6px ]
+                hint: [ width: 100%, text-align: left ]
+            custom_fields:
+              h: >
+                [[[ var d = new Date(); var t = states['todo.today']; var n = t ? Number(t.state)||0 : null;
+                    return '<div class="row between" style="margin-bottom:10px"><b style="font-size:14px">Today</b><span class="muted">' + d.toLocaleDateString('en-GB',{weekday:'long'}) + ' · ' + d.toLocaleDateString('en-GB',{day:'numeric',month:'short'}) + (n === null ? '' : ' · ' + (n === 0 ? 'all done' : n + ' to do')) + '</span></div>'; ]]]
+              st: >
+                [[[
+                  var st = (id) => (states[id]||{state:'?'}).state;
+                  var upd = Object.keys(states).filter(k => k.startsWith('update.') && states[k].state === 'on').length;
+                  var pb = Number(st('sensor.phone_battery_level'))||0, mb = Number(st('sensor.mac_battery'))||0;
+                  var chg = st('sensor.phone_battery_state') === 'charging';
+                  var pill = (ico, col, txt) => '<span class="pill" style="background:color-mix(in srgb,' + col + ' 16%, var(--nc-surface-2))"><ha-icon icon="' + ico + '" style="--mdc-icon-size:14px;color:' + col + '"></ha-icon>' + txt + '</span>';
+                  // Grab pill (packages/grab.yaml): only while something is happening,
+                  // so the strip stays as it was whenever the NAS is idle.
+                  var g = states['sensor.grab_status'] || { state: 'idle', attributes: {} };
+                  var ga = g.attributes || {};
+                  var grab = '';
+                  if (g.state === 'downloading') grab = pill('mdi:download', '#00e5ff', 'Grab ' + (Number(ga.pct) || 0) + '%');
+                  else if (g.state === 'imported') grab = pill('mdi:check-decagram', '#8fc31f', 'Grab imported');
+                  else if (g.state === 'failed')   grab = pill('mdi:alert-circle-outline', '#ff4f4f', 'Grab failed');
+                  else if (g.state === 'offline')  grab = pill('mdi:server-network-off', '#ff9f43', 'NAS offline');
+                  return '<div class="strip">'
+                    + grab
+                    + pill(chg ? 'mdi:battery-charging' : 'mdi:cellphone', pb < 20 ? '#ff4fa3' : '#8fc31f', 'Phone ' + pb + '%')
+                    + pill('mdi:laptop', '#1fa8ff', 'Mac ' + mb + '%')
+                    + pill(upd ? 'mdi:package-up' : 'mdi:check-circle-outline', upd ? '#7b61ff' : '#8a90a3', upd ? upd + ' update' + (upd === 1 ? '' : 's') : 'HA up to date')
+                    + '</div>';
+                ]]]
+              l:
+                card:
+                  type: conditional
+                  conditions: [ { condition: numeric_state, entity: todo.today, above: -1 } ]
+                  card:
+                    type: todo-list
+                    entity: todo.today
+                    hide_completed: false
+                    card_mod:
+                      style: |
+                        ha-card { background: none; border: none; box-shadow: none; padding: 0; }
+                        .header, h2, .divider { display: none; }
+                        .card-content, .content { padding: 0 !important; }
+                        .addRow { padding: 0 0 6px !important; margin: 0; }
+                        .addRow ha-textfield { --mdc-text-field-fill-color: var(--nc-surface-2); --mdc-text-field-idle-line-color: transparent; --mdc-text-field-hover-line-color: transparent; --mdc-shape-small: 14px; }
+                        .addRow ha-icon-button { color: var(--neon-purple); }
+                        ha-check-list-item, ha-md-list-item { --md-list-item-leading-space: 0; --md-list-item-trailing-space: 0; --mdc-list-side-padding: 0; --mdc-list-item-graphic-margin: 10px; min-height: 40px; --mdc-theme-secondary: var(--neon-lime); --md-checkbox-selected-container-color: #8fc31f; }
+                        ha-check-list-item.editRow.completed, .completed { opacity: .55; }
+              hint: >
+                [[[ return states['todo.today'] ? '' : '<div class="muted" style="margin-top:6px;line-height:1.4"><ha-icon icon="mdi:playlist-plus" style="--mdc-icon-size:16px;vertical-align:-3px;margin-right:4px"></ha-icon>No "Today" list yet. Settings → Devices &amp; services → Add integration → <b>Local To-do</b>, name it <b>Today</b>.</div>'; ]]]
+            extra_styles: |
+              .tag { font-size:10px; text-transform:uppercase; letter-spacing:1px; color:var(--nc-muted); font-weight:700; }
+              .mid { font-size:22px; font-weight:700; letter-spacing:-.5px; line-height:1.15; }
+              .muted { color:var(--nc-muted); font-size:12px; }
+              .row { display:flex; align-items:center; gap:12px; }
+              .row.between > .muted { min-width:0; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+              .between { justify-content:space-between; }
+              .grow { flex:1; min-width:0; }
+              .pill { display:inline-flex; align-items:center; gap:6px; padding:5px 10px; border-radius:999px; font-size:11px; font-weight:700; background:var(--nc-surface-2); color:var(--primary-text-color); }
+              .dot { width:9px; height:9px; border-radius:50%; display:inline-block; flex:none; }
+              .bar { height:6px; border-radius:999px; background:var(--nc-track); overflow:hidden; display:block; }
+              .bar i { display:block; height:100%; border-radius:999px; }
+              .item { display:flex; align-items:center; gap:10px; font-size:13px; min-width:0; }
+              .item .ico { width:34px; height:34px; border-radius:12px; display:grid; place-items:center; flex:none; }
+              .item .grow > div { white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+              .stat4 { display:grid; grid-template-columns:1fr 1fr; gap:12px 14px; }
+              .stat4 .st { border-left:3px solid var(--c); padding-left:10px; min-width:0; }
+              .stat4 .mid { font-size:20px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+              .urow { display:flex; align-items:center; gap:10px; font-size:13px; margin:7px 0; }
+              .urow .bar { width:80px; }
+              ha-icon { margin:0; }
+              .strip { display:flex; flex-wrap:wrap; gap:6px; }
+
+      # ================= floating now-playing bar =================
+      - type: custom:button-card
+        view_layout: { grid-area: now }
+        template: now_bar
+        entity: media_player.music_speaker
+        triggers_update: [media_player.bedroom_fire_tv, media_player.music_speaker, media_player.bedroom_soundbar]
+
+  - !include sky.yaml
+  - !include fitness.yaml

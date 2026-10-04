@@ -1,0 +1,224 @@
+# Grab package: start a direct-link download on the NAS from the phone.
+#
+# Sonarr's download clients speak torrent and usenet only, so a debrid HTTP link
+# (Torrentio /resolve/realdebrid/..., Sooti, HD Hub) cannot be pasted into it.
+# The NAS side (not included here) is a small script that accepts the commands
+# start <url> <quality> | retry | cancel | status, downloads the file into a folder
+# Sonarr can see, then drives Sonarr's ManualImport API, and prints JSON.
+#
+# SSH: host alias `nas` in /config/ssh/config (example at the end of secrets.example.yaml). Use a key of its own,
+# pinned to that script with a `command=` entry in authorized_keys on the NAS, so
+# HA can start, watch and cancel a grab and nothing else - it never gets a shell.
+
+input_text:
+  grab_url:
+    name: Grab link
+    icon: mdi:link-variant
+    max: 255          # HA's hard limit. Long filenames can push a link past it.
+
+input_select:
+  grab_quality:
+    name: Grab quality
+    icon: mdi:quality-high
+    # Debrid packs ship files named "Stranger Things - 5x01 - Chapter One.mkv"
+    # with no quality in them, and Sonarr then guesses HDTV-720p for a 45 GB UHD
+    # file. Picking the real quality here is what keeps the library honest.
+    options:
+      - Bluray-2160p Remux
+      - Bluray-2160p
+      - WEBDL-2160p
+    initial: Bluray-2160p Remux
+
+shell_command:
+  grab_start: ssh -F /config/ssh/config nas "start '{{ url }}' '{{ quality }}'"
+  grab_retry: ssh -F /config/ssh/config nas "retry"
+  grab_cancel: ssh -F /config/ssh/config nas "cancel"
+
+command_line:
+  - sensor:
+      name: Grab status
+      unique_id: grab_status
+      icon: mdi:download-network
+      scan_interval: 30
+      command: "ssh -F /config/ssh/config -o ConnectTimeout=5 nas 'status' 2>/dev/null || echo '{\"state\":\"offline\"}'"
+      value_template: "{{ value_json.state }}"
+      json_attributes:
+        - file
+        - quality
+        - done_gb
+        - total_gb
+        - pct
+        - mbps
+        - eta_min
+        - last
+
+template:
+  - sensor:
+      - name: Grab progress
+        unique_id: grab_progress
+        icon: mdi:progress-download
+        unit_of_measurement: "%"
+        state: >
+          {{ state_attr('sensor.grab_status', 'pct') | default(0, true) | int }}
+      - name: Grab summary
+        unique_id: grab_summary
+        icon: mdi:download-network
+        state: >
+          {% set s = states('sensor.grab_status') %}
+          {% set a = states.sensor.grab_status.attributes %}
+          {% if s == 'downloading' %}
+            {{ a.done_gb }}/{{ a.total_gb }} GB · {{ a.mbps }} MB/s · {{ a.eta_min }} min left
+          {% elif s == 'imported' %}
+            Imported: {{ a.file | default('', true) | truncate(60) }}
+          {% elif s == 'failed' %}
+            Failed: {{ a.last | default('', true) | truncate(60) }}
+          {% elif s == 'offline' %}
+            NAS unreachable
+          {% else %}
+            Idle
+          {% endif %}
+
+script:
+  grab_start:
+    alias: "Grab a link to the NAS"
+    icon: mdi:download-network
+    mode: single
+    fields:
+      url:
+        description: "Direct link. Defaults to input_text.grab_url."
+        example: "https://torrentio.strem.fun/resolve/realdebrid/.../file.mkv"
+      quality:
+        description: "Sonarr quality name. Defaults to input_select.grab_quality."
+        example: "Bluray-2160p Remux"
+    sequence:
+      - variables:
+          link: "{{ url | default(states('input_text.grab_url'), true) }}"
+          q: "{{ quality | default(states('input_select.grab_quality'), true) }}"
+      - if:
+          - condition: template
+            value_template: "{{ not link.startswith('http') }}"
+        then:
+          - action: notify.mobile_app_phone
+            data: { title: "Grab", message: "No link to grab." }
+          - stop: "no link"
+      - action: shell_command.grab_start
+        data: { url: "{{ link }}", quality: "{{ q }}" }
+        response_variable: out
+      - action: input_text.set_value
+        target: { entity_id: input_text.grab_url }
+        data: { value: "" }
+      - action: notify.mobile_app_phone
+        data:
+          title: "Grab started"
+          message: "{{ q }} · {{ (out.stdout | from_json).file | default('starting', true) }}"
+      - delay: { seconds: 5 }
+      - action: homeassistant.update_entity
+        target: { entity_id: sensor.grab_status }
+
+  grab_retry:
+    alias: "Retry the last NAS grab"
+    icon: mdi:restart
+    mode: single
+    sequence:
+      # The NAS keeps the last link and the .part file, so this only fetches
+      # what is missing.
+      - action: shell_command.grab_retry
+        response_variable: out
+      - variables:
+          res: "{{ out.stdout | from_json if (out.stdout | default('')).startswith('{') else {} }}"
+      - action: notify.mobile_app_phone
+        data:
+          title: "{{ 'Grab resumed' if res.ok | default(false) else 'Grab retry failed' }}"
+          message: "{{ res.file | default(res.error | default('no answer from the NAS', true), true) }}"
+      - delay: { seconds: 5 }
+      - action: homeassistant.update_entity
+        target: { entity_id: sensor.grab_status }
+
+  grab_cancel:
+    alias: "Cancel the NAS grab"
+    icon: mdi:close-octagon
+    mode: single
+    sequence:
+      - action: shell_command.grab_cancel
+      - delay: { seconds: 3 }
+      - action: homeassistant.update_entity
+        target: { entity_id: sensor.grab_status }
+
+automation:
+  - id: grab_finished
+    alias: "Grab finished"
+    mode: single
+    triggers:
+      - trigger: state
+        entity_id: sensor.grab_status
+        from: downloading
+        to: [imported, failed]
+    actions:
+      - action: notify.mobile_app_phone
+        data:
+          title: >
+            {{ 'Grab imported' if trigger.to_state.state == 'imported' else 'Grab failed' }}
+          message: >
+            {{ state_attr('sensor.grab_status', 'file') | default('', true) }}
+            {%- if trigger.to_state.state == 'failed' %}
+            — {{ state_attr('sensor.grab_status', 'last') }}
+            {%- endif %}
+          data:
+            tag: grab
+            actions: >
+              {{ [{'action': 'GRAB_RETRY', 'title': 'Retry'}]
+                 if trigger.to_state.state == 'failed' else [] }}
+
+  - id: grab_retry_from_notification
+    alias: "Grab · Retry tapped on the notification"
+    mode: single
+    triggers:
+      - trigger: event
+        event_type: mobile_app_notification_action
+        event_data: { action: GRAB_RETRY }
+    actions:
+      - action: script.grab_retry
+
+# --------------------------------------------------------------------------
+# Dashboard card. Drop this into a view in dashboards/*.yaml (it uses the same
+# glass / chip templates as the Mac card, so `extra_styles: *css` needs the
+# usual anchor in that file).
+#
+#   - type: custom:button-card
+#     template: glass
+#     show_icon: false
+#     show_name: false
+#     tap_action: { action: none }
+#     styles:
+#       card: [ pointer-events: auto, "--masonry-view-card-margin": 0px ]
+#       grid: [ grid-template-areas: '"h" "f" "b" "s"', grid-template-columns: "minmax(0,1fr)" ]
+#       custom_fields:
+#         h: [ width: 100%, text-align: left ]
+#         f: [ width: 100% ]
+#         b: [ width: 100%, margin-top: 10px ]
+#         s: [ width: 100%, margin-top: 8px, text-align: left ]
+#     custom_fields:
+#       h: >
+#         <div class="row between" style="margin-bottom:8px"><b style="font-size:14px">Grab to NAS</b>
+#         <span class="muted">debrid link → Sonarr</span></div>
+#       f:
+#         card:
+#           type: entities
+#           entities:
+#             - { entity: input_text.grab_url, name: Link, icon: mdi:link-variant }
+#             - { entity: input_select.grab_quality, name: Quality, icon: mdi:quality-high }
+#       b:
+#         card:
+#           type: custom:layout-card
+#           layout_type: custom:grid-layout
+#           layout: { grid-template-columns: "repeat(2, minmax(0,1fr))", grid-gap: 8px, margin: 0, padding: 0 }
+#           cards:
+#             - { type: custom:button-card, template: chip, name: Grab, icon: mdi:download,
+#                 variables: { color: var(--neon-cyan) },
+#                 tap_action: { action: call-service, service: script.grab_start } }
+#             - { type: custom:button-card, template: chip, name: Cancel, icon: mdi:close-octagon,
+#                 variables: { color: var(--neon-orange) },
+#                 tap_action: { action: call-service, service: script.grab_cancel } }
+#       s: >
+#         [[[ return `<div class="muted" style="font-size:12px">${states['sensor.grab_summary'].state}</div>` ]]]
+#     extra_styles: *css

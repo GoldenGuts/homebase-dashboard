@@ -1,0 +1,70 @@
+# Overhead: planes and satellites above the house (Home view "Overhead" card + the Android widget).
+#
+# bin/overhead.py runs inside the HA core container (see its header for the data sources).
+#   sensor.planes_overhead      state = planes within 100 km; attrs: close (<25 km), planes[], closest
+#   sensor.satellites_overhead  state = low-orbit satellites more than 30° up; attrs: high, starlink,
+#                               nav, isro, iss{el,az,next_pass}, highest[], notable[]
+# Home lat/lon come from zone.home, so nothing is hard-coded here.
+#
+# Planes poll every minute (adsb.lol). Anonymous OpenSky allows 400 calls a day, so the script asks
+# it only every 5 min by itself. With a free OpenSky account (opensky-network.org -> Account ->
+# API clients -> create), write
+#   {"opensky_client_id": "...", "opensky_client_secret": "..."}
+# to /config/overhead_secrets.json (ssh ha) and OpenSky is asked every minute too. No restart needed.
+
+command_line:
+  - sensor:
+      name: Planes overhead
+      unique_id: planes_overhead
+      icon: mdi:airplane
+      command: "python3 /config/bin/overhead.py planes {{ state_attr('zone.home','latitude') }} {{ state_attr('zone.home','longitude') }}"
+      value_template: "{{ value_json.state }}"
+      json_attributes:
+        - close
+        - radius_km
+        - close_km
+        - planes
+        - closest
+        - sources
+        - errors
+        - stale
+        - error
+        - updated
+      scan_interval: 60
+      command_timeout: 50
+
+  - sensor:
+      name: Satellites overhead
+      unique_id: satellites_overhead
+      icon: mdi:satellite-variant
+      command: "python3 /config/bin/overhead.py sats {{ state_attr('zone.home','latitude') }} {{ state_attr('zone.home','longitude') }}"
+      value_template: "{{ value_json.state }}"
+      json_attributes:
+        - high
+        - all
+        - min_elevation
+        - in_sky
+        - starlink
+        - nav
+        - isro
+        - kinds
+        - lit
+        - night
+        - sun_el
+        - highest
+        - notable
+        - iss
+        - tracked
+        - tle_age_h
+        - stale
+        - error
+        - updated
+      scan_interval: 120
+      command_timeout: 90
+
+# Both change every run; their history is noise. Keep them out of the db.
+recorder:
+  exclude:
+    entities:
+      - sensor.planes_overhead
+      - sensor.satellites_overhead

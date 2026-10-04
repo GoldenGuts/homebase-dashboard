@@ -1,0 +1,307 @@
+# Bedroom media scenes and helpers used by the Home dashboard hero card.
+script:
+  movie_mode:
+    alias: "Movie mode"
+    icon: mdi:movie-open
+    mode: single
+    sequence:
+      - action: light.turn_off
+        target: { entity_id: light.bedroom_lights }
+      - action: media_player.turn_on
+        target: { entity_id: media_player.bedroom_fire_tv }
+      - action: media_player.turn_on
+        target: { entity_id: media_player.bedroom_soundbar }
+  tv_app:
+    alias: "Open app on the TV"
+    icon: mdi:television-play
+    mode: queued
+    fields:
+      app:
+        description: "Android package id, e.g. com.netflix.ninja"
+        example: com.netflix.ninja
+    sequence:
+      - action: media_player.turn_on
+        target: { entity_id: media_player.bedroom_fire_tv }
+      - action: media_player.select_source
+        target: { entity_id: media_player.bedroom_fire_tv }
+        data: { source: "{{ app }}" }
+
+  # Kodi key on the hero card. Opens Kodi as usual, then fills the small menu under the remote
+  # keys (continue the last item / next up / new) from Kodi's Jellyfin library via bin/kodi.py.
+  # Tapping the key while the menu is open just closes it.
+  kodi_open:
+    alias: "Open Kodi and show the pick menu"
+    icon: mdi:kodi
+    mode: restart
+    sequence:
+      - if:
+          - condition: state
+            entity_id: input_boolean.kodi_menu
+            state: "on"
+        then:
+          - action: input_boolean.turn_off
+            target: { entity_id: input_boolean.kodi_menu }
+          - stop: "menu closed"
+      - event: kodi_menu
+        event_data: { state: loading, continue: null, new: [] }
+      - action: input_boolean.turn_on
+        target: { entity_id: input_boolean.kodi_menu }
+      - action: media_player.turn_on
+        target: { entity_id: media_player.bedroom_fire_tv }
+      - action: media_player.select_source
+        target: { entity_id: media_player.bedroom_fire_tv }
+        data: { source: org.xbmc.kodi }
+      # Kodi takes ~10 s to start on the Fire TV; poll the JSON-RPC port for up to 40 s.
+      - repeat:
+          sequence:
+            - action: shell_command.kodi
+              data: { args: ping }
+              response_variable: ping
+            - if:
+                - condition: template
+                  value_template: "{{ not (ping.stdout | from_json).ok }}"
+              then:
+                - delay: { seconds: 2 }
+          until: "{{ (ping.stdout | from_json).ok or repeat.index >= 20 }}"
+      - if:
+          - condition: template
+            value_template: "{{ not (ping.stdout | from_json).ok }}"
+        then:
+          - event: kodi_menu
+            event_data: { state: error, continue: null, new: [] }
+          - stop: "Kodi did not answer"
+      - action: shell_command.kodi
+        data: { args: menu }
+        response_variable: menu
+      - variables:
+          picks: "{{ menu.stdout | from_json }}"
+      - event: kodi_menu
+        event_data:
+          state: "{{ 'ready' if 'new' in picks else 'error' }}"
+          continue: "{{ picks.get('continue') }}"
+          new: "{{ picks.get('new', []) }}"
+
+  kodi_play:
+    alias: "Play a Kodi library item"
+    icon: mdi:play
+    mode: single
+    fields:
+      kind:
+        description: "episode or movie"
+        example: episode
+      id:
+        description: "Kodi episodeid / movieid"
+        example: 48
+      resume:
+        description: "true = continue from the saved position"
+        example: true
+    sequence:
+      - action: shell_command.kodi
+        data: { args: "play {{ kind }} {{ id }}{{ ' resume' if resume else '' }}" }
+      - action: input_boolean.turn_off
+        target: { entity_id: input_boolean.kodi_menu }
+
+  resume_music:
+    alias: "Resume or surprise music on soundbar"
+    icon: mdi:play
+    mode: restart
+    sequence:
+      - if:
+          - condition: template
+            value_template: "{{ (state_attr('media_player.bedroom_soundbar','volume_level') or 0) < 0.13 }}"
+        then:
+          - action: media_player.volume_set
+            target: { entity_id: media_player.bedroom_soundbar }
+            data: { volume_level: 0.13 }
+      - if:
+          - condition: template
+            value_template: "{{ states('media_player.music_speaker') == 'paused' }}"
+        then:
+          - action: media_player.media_play
+            target: { entity_id: media_player.music_speaker }
+        else:
+          - action: script.surprise_music
+
+  surprise_music:
+    alias: "Surprise music on soundbar"
+    icon: mdi:dice-multiple
+    mode: restart
+    sequence:
+      - if:
+          - condition: template
+            value_template: "{{ (state_attr('media_player.bedroom_soundbar','volume_level') or 0) < 0.13 }}"
+        then:
+          - action: media_player.volume_set
+            target: { entity_id: media_player.bedroom_soundbar }
+            data: { volume_level: 0.13 }
+      - variables:
+          # Example playlist names; use playlists that exist in your Music Assistant library.
+          playlists:
+            - "Liked Songs"
+            - "Daily Mix 1"
+            - "Chill Mix"
+            - "Top Hits"
+          chosen_playlist: "{{ playlists | random }}"
+      - action: music_assistant.play_media
+        target: { entity_id: media_player.music_speaker }
+        data:
+          media_id: "{{ chosen_playlist }}"
+          media_type: playlist
+          enqueue: replace
+          radio_mode: false
+      - action: media_player.shuffle_set
+        target: { entity_id: media_player.music_speaker }
+        data:
+          shuffle: true
+
+  # Voice/LLM entry point: "play loser", "play loser by tame impala", "play some jazz", "surprise me".
+  # Expose it to Assist so an LLM conversation agent (e.g. via the HA MCP server) sees it as a tool.
+  # Always plays on the soundbar, replaces the queue, takes the top search hit - no questions.
+  play_music:
+    alias: "Play music on the soundbar"
+    description: >-
+      Play music on the bedroom soundbar right away. Give the song, album, artist, or playlist
+      name in `query`. Put the artist in `artist` only when the user names one. Use `kind`
+      to say what the query is; default to track. Never ask the user which result to pick.
+    icon: mdi:music
+    mode: restart
+    fields:
+      query:
+        name: Query
+        description: "Song, album, artist, playlist, or genre name, e.g. 'Loser'. Leave empty or 'something' to surprise."
+        required: false
+        example: Loser
+        selector:
+          text:
+      artist:
+        name: Artist
+        description: "Artist name if the user said one, e.g. 'Tame Impala'"
+        required: false
+        example: Tame Impala
+        selector:
+          text:
+      kind:
+        name: Kind
+        description: "track (default), album, artist, playlist, or radio (genre/mood)"
+        required: false
+        default: track
+        selector:
+          select:
+            options: [track, album, artist, playlist, radio]
+    sequence:
+      - if:
+          - condition: template
+            value_template: >-
+              {{ query is not defined or query is none or query | trim | lower in ['', 'something', 'random', 'surprise', 'music', 'some music', 'surprise me'] }}
+        then:
+          - action: script.surprise_music
+          - stop: "Surprise music initiated"
+      - variables:
+          k: "{{ kind | default('track') }}"
+      # The soundbar has its own device volume (SmartThings). If it is near zero, AirPlay
+      # plays silently. Raise it to a floor so "play X" is always audible.
+      - if:
+          - condition: template
+            value_template: "{{ (state_attr('media_player.bedroom_soundbar','volume_level') or 0) < 0.13 }}"
+        then:
+          - action: media_player.volume_set
+            target: { entity_id: media_player.bedroom_soundbar }
+            data: { volume_level: 0.13 }
+      - if:
+          - condition: template
+            value_template: "{{ k == 'radio' }}"
+        then:
+          - action: music_assistant.play_media
+            target: { entity_id: media_player.music_speaker }
+            data:
+              media_id: "{{ query }}"
+              media_type: track
+              enqueue: replace
+              radio_mode: true
+        else:
+          - action: music_assistant.play_media
+            target: { entity_id: media_player.music_speaker }
+            data:
+              media_id: "{{ query }}"
+              media_type: "{{ k }}"
+              artist: "{{ artist | default('') }}"
+              enqueue: replace
+              radio_mode: "{{ false if k == 'playlist' else true }}"
+
+# Local Assist intent. Needs a custom sentences file (custom_sentences/en/*.yaml, not included)
+# that maps phrases to PlayMusicOnSoundbar with {query}/{artist}/{kind} slots. No LLM involved.
+intent_script:
+  PlayMusicOnSoundbar:
+    action:
+      - action: script.play_music
+        data:
+          query: "{{ query | default('something') }}"
+          artist: "{{ artist | default('') }}"
+          kind: "{{ kind | default('track') }}"
+    speech:
+      text: >-
+        {% if query is not defined or query is none or query | trim | lower in ['', 'something', 'random', 'surprise', 'music', 'some music', 'surprise me'] %}
+          Playing surprise music on the soundbar.
+        {% else %}
+          Playing {{ query }}{% if artist %} by {{ artist }}{% endif %} on the soundbar.
+        {% endif %}
+
+# ---- Kodi pick menu plumbing ----
+# The Kodi HTTP port (8080) only binds IPv6 on the Fire TV, so the Kodi integration cannot connect.
+# bin/kodi.py talks to the raw JSON-RPC TCP port (9090) instead. Copy it to /config/bin.
+# Set the Fire TV / Kodi address with the KODI_HOST environment variable or edit HOST in bin/kodi.py.
+shell_command:
+  kodi: "python3 /config/bin/kodi.py {{ args }}"
+
+input_boolean:
+  kodi_menu:
+    name: "Kodi menu open"
+    icon: mdi:kodi
+
+template:
+  - trigger:
+      - trigger: event
+        event_type: kodi_menu
+    sensor:
+      - name: "Kodi menu"
+        unique_id: kodi_menu
+        icon: mdi:kodi
+        state: "{{ trigger.event.data.state }}"
+        attributes:
+          continue: "{{ trigger.event.data.continue }}"
+          new: "{{ trigger.event.data.new }}"
+
+automation:
+  - id: kodi_menu_auto_close
+    alias: "Kodi · close the pick menu after 3 minutes"
+    triggers:
+      - trigger: state
+        entity_id: input_boolean.kodi_menu
+        to: "on"
+        for: { minutes: 3 }
+    actions:
+      - action: input_boolean.turn_off
+        target: { entity_id: input_boolean.kodi_menu }
+
+  # If any widget or dashboard calls media_play on the soundbar while it's idle/off,
+  # start a surprise stream with infinite radio instead of doing nothing.
+  - id: soundbar_play_idle_surprise
+    alias: "Soundbar · play when idle starts surprise"
+    mode: restart
+    triggers:
+      - trigger: event
+        event_type: call_service
+        event_data:
+          domain: media_player
+          service: media_play
+    conditions:
+      - condition: template
+        value_template: >-
+          {{ (trigger.event.data.service_data.entity_id in ['media_player.music_speaker', 'media_player.bedroom_soundbar']
+              or 'media_player.music_speaker' in (trigger.event.data.service_data.entity_id | default([])))
+             and states('media_player.music_speaker') in ['idle', 'off', 'unknown', 'standby'] }}
+    actions:
+      - action: script.surprise_music
+
+  # Removed 2026-10-01: the stall auto-recover automation restarted music every time the soundbar was paused or
+  # turned off (idle looks the same as a stall). Do not re-add without a way to tell a user stop from a stall.

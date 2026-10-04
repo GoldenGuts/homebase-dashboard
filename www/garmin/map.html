@@ -1,0 +1,320 @@
+<!doctype html>
+<!--
+  Garmin activity map. Served by Home Assistant at /local/garmin/map.html and embedded in the
+  Fitness view (dashboards/fitness.yaml). Data: /local/garmin/activities.json, written by
+  bin/garmin_activities.py. Theme: ?theme=dark|light, else the parent HA page's dark mode
+  (same origin), else prefers-color-scheme. The Fitness feed posts {garminFocus:<id>} on the
+  top window to fly to one activity.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Activity map</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin="">
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
+<style>
+  :root {
+    --panel: rgba(23,26,34,.80); --panel-2: rgba(29,33,48,.9); --line: rgba(255,255,255,.08);
+    --ink: #f3f4f8; --muted: #8a90a3; --track: #262a36;
+    --orange:#ff9f2e; --pink:#ff4fa3; --lime:#b5e21c; --cyan:#3fe3ff; --purple:#7b61ff;
+    --shadow: 0 10px 30px rgba(0,0,0,.45);
+  }
+  html[data-theme="light"] {
+    --panel: rgba(255,255,255,.84); --panel-2: rgba(241,243,248,.95); --line: rgba(20,24,40,.08);
+    --ink: #14161e; --muted: #6b7285; --track: #e3e6ee;
+    --orange:#ff8a1e; --pink:#ff2d8a; --lime:#7fb800; --cyan:#0aa8e0; --purple:#6a3dff;
+    --shadow: 0 10px 30px rgba(20,24,40,.12);
+  }
+  html, body { margin:0; height:100%; background:#0d0f14; font-family: Inter, -apple-system, system-ui, sans-serif; color:var(--ink); overflow:hidden; }
+  html[data-theme="light"] body { background:#eef0f6; }
+  #map { position:absolute; inset:0; background: transparent; }
+  html[data-theme="dark"] .leaflet-tile-pane { filter: brightness(.7) saturate(.7); }
+  .leaflet-container { font-family: inherit; }
+  .leaflet-control-attribution { background: var(--panel) !important; color: var(--muted) !important; font-size: 9px; border-radius: 8px 0 0 0; padding: 2px 6px; }
+  .leaflet-control-attribution a { color: var(--muted) !important; }
+  .leaflet-control-zoom { display:none; }
+
+  .ui { position:absolute; z-index:500; pointer-events:none; }
+  .ui > * { pointer-events:auto; }
+  .panel { background: var(--panel); backdrop-filter: blur(18px) saturate(160%); -webkit-backdrop-filter: blur(18px) saturate(160%); border: 1px solid var(--line); border-radius: 16px; box-shadow: var(--shadow); }
+
+  /* top-left: type filter chips */
+  #chips { top:12px; left:12px; right:12px; display:flex; flex-wrap:wrap; gap:6px; }
+  #places { top:48px; left:12px; right:12px; display:flex; flex-wrap:wrap; gap:6px; }
+  .chip.place { font-weight:600; background: var(--panel-2); }
+  .chip.place.on { border-color: var(--cyan); box-shadow: 0 0 0 1px var(--cyan) inset; }
+  .chip.place svg { width:12px; height:12px; fill: var(--cyan); }
+  .chip { display:inline-flex; align-items:center; gap:6px; padding:6px 11px; border-radius:999px; font-size:11px; font-weight:700; color:var(--ink); background:var(--panel); border:1px solid var(--line); backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px); cursor:pointer; user-select:none; transition: transform .15s, opacity .2s, background .2s; white-space:nowrap; }
+  .chip:hover { transform: translateY(-1px); }
+  .chip.off { opacity:.42; }
+  .chip .dot { width:8px; height:8px; border-radius:50%; background: var(--c); box-shadow: 0 0 10px var(--c); }
+  .chip .n { color: var(--muted); font-weight:600; }
+
+  /* bottom-right: actions */
+  #actions { bottom:12px; right:12px; display:flex; gap:6px; }
+  .btn { display:inline-flex; align-items:center; gap:6px; padding:8px 12px; border-radius:999px; font-size:11px; font-weight:700; color:var(--ink); background:var(--panel); border:1px solid var(--line); backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px); cursor:pointer; user-select:none; transition: transform .15s, background .2s; }
+  .btn:hover { transform: translateY(-1px); }
+  .btn svg { width:14px; height:14px; fill: currentColor; }
+  .btn.hot { background: linear-gradient(160deg,#ff5c8a,#ff2d6f); color:#fff; border-color: transparent; }
+
+  /* bottom-left: activity detail */
+  #info { bottom:12px; left:12px; max-width: min(360px, calc(100% - 24px)); padding:12px 14px; transform: translateY(8px); opacity:0; transition: opacity .2s, transform .2s; }
+  #info.show { transform:none; opacity:1; }
+  #info .title { display:flex; align-items:center; gap:8px; font-size:14px; font-weight:700; letter-spacing:-.2px; }
+  #info .title .dot { width:9px; height:9px; border-radius:50%; background:var(--c); box-shadow:0 0 12px var(--c); flex:none; }
+  #info .meta { font-size:11px; color:var(--muted); margin-top:2px; }
+  #info .stats { display:grid; grid-template-columns: repeat(4, auto); gap:6px 14px; margin-top:10px; }
+  #info .st { border-left: 3px solid var(--c); padding-left: 8px; }
+  #info .st b { display:block; font-size:16px; font-weight:700; letter-spacing:-.4px; white-space:nowrap; }
+  #info .st span { font-size:10px; color: var(--muted); text-transform:uppercase; letter-spacing:.6px; }
+  #info a { color: var(--cyan); text-decoration:none; font-size:11px; font-weight:700; }
+  #info .foot { display:flex; justify-content:space-between; align-items:center; margin-top:10px; }
+
+  /* lock badge: shown until the first tap */
+  #lock { bottom:52px; right:12px; width:30px; height:30px; border-radius:50%; display:grid; place-items:center; background:var(--panel); border:1px solid var(--line); cursor:pointer; opacity:.85; }
+  #lock svg { width:14px; height:14px; fill: var(--muted); }
+
+  /* empty / loading */
+  #empty { top:50%; left:50%; transform:translate(-50%,-50%); padding:14px 18px; text-align:center; font-size:13px; color:var(--muted); }
+  #empty b { color:var(--ink); display:block; font-size:15px; margin-bottom:2px; }
+
+  .head-marker { border-radius:50%; background:#fff; box-shadow: 0 0 0 3px var(--c), 0 0 18px 4px var(--c); }
+  @media (max-width: 560px) { #info .stats { grid-template-columns: repeat(2, auto); } .chip { padding:5px 9px; } }
+</style>
+</head>
+<body>
+<div id="map"></div>
+<div class="ui" id="chips"></div>
+<div class="ui" id="places"></div>
+<div class="ui" id="actions">
+  <div class="btn" id="bLatest" title="Fly to the newest track"><svg viewBox="0 0 24 24"><path d="M12 2L4.5 20.3l.7.7L12 18l6.8 3 .7-.7z"/></svg>Latest</div>
+  <div class="btn" id="bFit" title="Show everything"><svg viewBox="0 0 24 24"><path d="M3 3h6v2H5v4H3zm12 0h6v6h-2V5h-4zM3 15h2v4h4v2H3zm16 0h2v6h-6v-2h4z"/></svg>Fit</div>
+  <div class="btn" id="bReplay" title="Replay every track in order"><svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>Replay</div>
+</div>
+<div class="ui" id="lock" title="Tap to pan and zoom"><svg viewBox="0 0 24 24"><path d="M12 17a2 2 0 1 0 0-4 2 2 0 0 0 0 4zm6-9h-1V6a5 5 0 0 0-10 0v2H6a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V10a2 2 0 0 0-2-2zM9 6a3 3 0 0 1 6 0v2H9z"/></svg></div>
+<div class="ui panel" id="info"></div>
+<div class="ui panel" id="empty"><b>Loading tracks…</b>reading activities.json</div>
+
+<script>
+(function () {
+  // ---------- theme ----------
+  const q = new URLSearchParams(location.search);
+  function parentDark() {
+    try { const h = window.parent && window.parent.document.querySelector('home-assistant'); if (h && h.hass && h.hass.themes) return !!h.hass.themes.darkMode; } catch (e) {}
+    return null;
+  }
+  function wantDark() {
+    if (q.get('theme') === 'dark') return true;
+    if (q.get('theme') === 'light') return false;
+    const p = parentDark(); if (p !== null) return p;
+    return window.matchMedia('(prefers-color-scheme: dark)').matches;
+  }
+  let dark = wantDark();
+  document.documentElement.dataset.theme = dark ? 'dark' : 'light';
+
+  // ---------- palette by activity type ----------
+  const COL = { running:'--lime', treadmill_running:'--lime', trail_running:'--lime', walking:'--orange', hiking:'--orange',
+    cycling:'--cyan', road_biking:'--cyan', mountain_biking:'--cyan', indoor_cycling:'--cyan', swimming:'--cyan', lap_swimming:'--cyan', open_water_swimming:'--cyan',
+    pickleball:'--pink', badminton:'--pink', tennis:'--pink', table_tennis:'--pink', squash:'--pink', basketball:'--pink', soccer:'--pink', cricket:'--pink',
+    stair_climbing:'--orange', track_running:'--lime', strength_training:'--purple', indoor_cardio:'--purple', cardio:'--purple', yoga:'--purple', hiit:'--purple', elliptical:'--purple', other:'--purple' };
+  const LABEL = { running:'Run', treadmill_running:'Treadmill', trail_running:'Trail run', walking:'Walk', hiking:'Hike', cycling:'Ride', road_biking:'Ride', mountain_biking:'MTB', indoor_cycling:'Indoor ride',
+    stair_climbing:'Stairs', track_running:'Track run', cricket:'Cricket', swimming:'Swim', lap_swimming:'Swim', open_water_swimming:'Open water', pickleball:'Pickleball', badminton:'Badminton', tennis:'Tennis', table_tennis:'Table tennis', strength_training:'Strength', indoor_cardio:'Cardio', cardio:'Cardio', yoga:'Yoga', hiit:'HIIT', elliptical:'Elliptical', other:'Other' };
+  const css = (v) => getComputedStyle(document.documentElement).getPropertyValue(v).trim();
+  const colorOf = (t) => css(COL[t] || '--purple');
+  const labelOf = (t) => LABEL[t] || (t || 'other').replace(/_/g, ' ').replace(/^\w/, c => c.toUpperCase());
+
+  // ---------- formatting ----------
+  const fmtDist = (m) => m >= 1000 ? (m / 1000).toFixed(m >= 10000 ? 1 : 2) + ' km' : Math.round(m) + ' m';
+  const fmtDur = (s) => { s = Math.round(s || 0); const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60); return h ? h + 'h ' + String(m).padStart(2, '0') + 'm' : m + 'm ' + String(s % 60).padStart(2, '0') + 's'; };
+  const distSport = (t) => /run|walk|hik|cycl|bik|swim|row|ski/.test(t || '');
+  const fmtPace = (a) => { if (!distSport(a.type) || !a.speed || a.speed < 0.3) return null; if (/cycl|bik/.test(a.type)) return (a.speed * 3.6).toFixed(1) + ' km/h'; const p = 1000 / a.speed / 60; return Math.floor(p) + ':' + String(Math.round((p % 1) * 60)).padStart(2, '0') + ' /km'; };
+  const fmtDate = (s) => { const d = new Date(s); return isNaN(d) ? '' : d.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' }) + ' · ' + d.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' }); };
+
+  // ---------- map ----------
+  // Starts "locked" (no wheel zoom, no one-finger drag) so the dashboard page keeps scrolling over
+  // the map; the first tap on the map unlocks it. Pinch zoom always works.
+  const map = L.map('map', { zoomControl: false, attributionControl: true, preferCanvas: true, zoomSnap: .25, scrollWheelZoom: false, dragging: !window.matchMedia('(pointer: coarse)').matches });
+  let locked = true;
+  const unlock = () => { if (!locked) return; locked = false; map.scrollWheelZoom.enable(); map.dragging.enable(); document.getElementById('lock').style.display = 'none'; };
+  map.on('click', unlock);
+  document.getElementById('lock').onclick = unlock;
+  // Esri's gray canvases need no API key (CARTO's basemaps do now). Base below, labels in their own
+  // pane under the tracks so a neon line always wins over a street name.
+  const ESRI = 'https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/';
+  const TILES = { dark: [ESRI + 'World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}', ESRI + 'World_Dark_Gray_Reference/MapServer/tile/{z}/{y}/{x}'],
+                  light: [ESRI + 'World_Light_Gray_Base/MapServer/tile/{z}/{y}/{x}', ESRI + 'World_Light_Gray_Reference/MapServer/tile/{z}/{y}/{x}'] };
+  map.createPane('labels').style.zIndex = 250;
+  const tileOpts = { attribution: 'Tiles &copy; Esri', maxNativeZoom: 16, maxZoom: 18 };
+  let tiles = L.tileLayer(TILES[dark ? 'dark' : 'light'][0], tileOpts).addTo(map);
+  let labels = L.tileLayer(TILES[dark ? 'dark' : 'light'][1], { ...tileOpts, pane: 'labels', opacity: .85 }).addTo(map);
+  const renderer = L.canvas({ padding: .5 });
+  const HOME = [Number(q.get('lat')) || 0, Number(q.get('lon')) || 0];   // the dashboard passes ?lat=&lon= from HA's home location
+  map.setView(HOME, 12);
+
+  let acts = [], layers = [], filterOff = new Set(), selected = null, replaying = false;
+  const info = document.getElementById('info'), empty = document.getElementById('empty');
+
+  function trackLayers(a) {
+    const c = colorOf(a.type), ll = a.poly;
+    const glow1 = L.polyline(ll, { renderer, color: c, weight: 11, opacity: .10, lineCap: 'round', lineJoin: 'round', interactive: false });
+    const glow2 = L.polyline(ll, { renderer, color: c, weight: 6, opacity: .22, lineCap: 'round', lineJoin: 'round', interactive: false });
+    const core = L.polyline(ll, { renderer, color: c, weight: 2.6, opacity: .95, lineCap: 'round', lineJoin: 'round', interactive: false });
+    // Invisible wide line on top = generous hit area (canvas hit-tests geometry, not pixels).
+    const hit = L.polyline(ll, { renderer, color: c, weight: 18, opacity: 0, bubblingMouseEvents: false });
+    hit.on('mouseover', () => { if (!replaying) { core.setStyle({ weight: 4 }); glow2.setStyle({ opacity: .45 }); show(a, false); } });
+    hit.on('mouseout', () => { if (!replaying) { core.setStyle({ weight: 2.6 }); glow2.setStyle({ opacity: .22 }); if (selected !== a) hide(); } });
+    hit.on('click', () => { select(a, true); });
+    return { a, group: L.layerGroup([glow1, glow2, core, hit]), core, glow2, kind: 'track' };
+  }
+  function pointLayer(a) {
+    const c = colorOf(a.type);
+    const halo = L.circleMarker([a.lat, a.lon], { renderer, radius: 11, color: c, weight: 0, fillColor: c, fillOpacity: .18, interactive: false });
+    const dot = L.circleMarker([a.lat, a.lon], { renderer, radius: 5, color: '#fff', weight: 1.5, fillColor: c, fillOpacity: 1, bubblingMouseEvents: false });
+    dot.on('mouseover', () => show(a, false)); dot.on('mouseout', () => { if (selected !== a) hide(); }); dot.on('click', () => select(a, true));
+    return { a, group: L.layerGroup([halo, dot]), core: dot, kind: 'point' };
+  }
+  function build() {
+    layers.forEach(l => map.removeLayer(l.group)); layers = [];
+    // Oldest first so the newest track paints on top.
+    [...acts].reverse().forEach(a => {
+      if (a.poly && a.poly.length > 1) layers.push(trackLayers(a));
+      else if (a.lat && a.lon) layers.push(pointLayer(a));
+    });
+    applyFilter();
+  }
+  function visible(a) { return !filterOff.has(a.type); }
+  function applyFilter() {
+    layers.forEach(l => { const on = visible(l.a); if (on && !map.hasLayer(l.group)) l.group.addTo(map); if (!on && map.hasLayer(l.group)) map.removeLayer(l.group); });
+    const n = layers.filter(l => visible(l.a)).length;
+    empty.style.display = n ? 'none' : '';
+    if (!n) empty.innerHTML = acts.length ? '<b>No GPS tracks yet</b>' + (acts.some(a => a.has_poly) ? 'tracks are still syncing · check back in a bit' : 'indoor sessions have no route') : '<b>No activities yet</b>waiting for the first Garmin sync';
+  }
+  function bounds(onlyVisible) {
+    const b = L.latLngBounds([]);
+    layers.forEach(l => { if (onlyVisible && !visible(l.a)) return; if (l.kind === 'track') b.extend(l.core.getBounds()); else b.extend(l.core.getLatLng()); });
+    return b;
+  }
+  function fitAll(animate) { const b = bounds(true); if (b.isValid()) map.fitBounds(b, { padding: [56, 56], maxZoom: 15, animate: !!animate, duration: 1.2 }); else map.setView(HOME, 12); }
+  function flyTo(a) { const l = layers.find(x => x.a === a); if (!l) return; if (l.kind === 'track') map.flyToBounds(l.core.getBounds(), { padding: [60, 60], maxZoom: 16, duration: 1.4 }); else map.flyTo(l.core.getLatLng(), 15, { duration: 1.2 }); }
+
+  function show(a, sticky) {
+    const c = colorOf(a.type), pace = fmtPace(a);
+    const st = [];
+    if (distSport(a.type) && a.dist > 50) st.push([fmtDist(a.dist), 'distance']);
+    st.push([fmtDur(a.dur), 'time']);
+    if (!distSport(a.type) && a.dist > 200) st.push([fmtDist(a.dist), 'covered']);
+    if (pace && (a.dist > 400)) st.push([pace, /km\/h/.test(pace) ? 'speed' : 'pace']);
+    if (a.hr) st.push([Math.round(a.hr) + ' bpm', 'avg HR']);
+    if (a.cal) st.push([Math.round(a.cal) + ' kcal', 'burned']);
+    if (a.elev > 5) st.push([Math.round(a.elev) + ' m', 'climb']);
+    info.style.setProperty('--c', c);
+    info.innerHTML = '<div class="title"><span class="dot"></span><span>' + esc(a.name || labelOf(a.type)) + '</span></div>'
+      + '<div class="meta">' + labelOf(a.type) + ' · ' + fmtDate(a.start) + (a.loc ? ' · ' + esc(a.loc) : '') + '</div>'
+      + '<div class="stats">' + st.slice(0, 4).map(s => '<div class="st"><b>' + s[0] + '</b><span>' + s[1] + '</span></div>').join('') + '</div>'
+      + '<div class="foot"><span class="meta">' + (sticky ? 'tap the map to close' : '') + '</span><a href="https://connect.garmin.com/modern/activity/' + a.id + '" target="_blank" rel="noopener">Open in Garmin ↗</a></div>';
+    info.classList.add('show');
+  }
+  function hide() { info.classList.remove('show'); }
+  function select(a, fly) { selected = a; show(a, true); if (fly) flyTo(a); }
+  map.on('click', () => { selected = null; hide(); });
+  const esc = (s) => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+
+  // ---------- chips ----------
+  function chips() {
+    const counts = {}; acts.forEach(a => { if ((a.poly && a.poly.length > 1) || (a.lat && a.lon)) counts[a.type] = (counts[a.type] || 0) + 1; });
+    const types = Object.keys(counts).sort((x, y) => counts[y] - counts[x]);
+    const host = document.getElementById('chips'); host.innerHTML = '';
+    types.forEach(t => {
+      const el = document.createElement('div'); el.className = 'chip' + (filterOff.has(t) ? ' off' : ''); el.style.setProperty('--c', colorOf(t));
+      el.innerHTML = '<span class="dot"></span>' + labelOf(t) + ' <span class="n">' + counts[t] + '</span>';
+      el.onclick = () => { if (filterOff.has(t)) filterOff.delete(t); else filterOff.add(t); el.classList.toggle('off', filterOff.has(t)); applyFilter(); fitAll(true); };
+      host.appendChild(el);
+    });
+  }
+
+  // ---------- places: tracks clustered on a ~0.5 degree grid, named by the most common Garmin location ----------
+  let placeList = [], placeOn = -1;
+  function places() {
+    const cells = {};
+    layers.forEach(l => {
+      const ll = l.kind === 'track' ? l.core.getBounds().getCenter() : l.core.getLatLng();
+      const k = Math.round(ll.lat * 2) / 2 + ',' + Math.round(ll.lng * 2) / 2;
+      const c = cells[k] = cells[k] || { n: 0, b: L.latLngBounds([]), names: {} };
+      c.n++; c.b.extend(l.kind === 'track' ? l.core.getBounds() : ll);
+      if (l.a.loc) c.names[l.a.loc] = (c.names[l.a.loc] || 0) + 1;
+    });
+    placeList = Object.values(cells).sort((a, b) => b.n - a.n).map((c, i) => ({ ...c, name: Object.keys(c.names).sort((x, y) => c.names[y] - c.names[x])[0] || ('Spot ' + (i + 1)) }));
+    const host = document.getElementById('places'); host.innerHTML = '';
+    if (placeList.length < 2) return;
+    placeList.forEach((p, i) => {
+      const el = document.createElement('div'); el.className = 'chip place' + (i === placeOn ? ' on' : '');
+      el.innerHTML = '<svg viewBox="0 0 24 24"><path d="M12 2a7 7 0 0 0-7 7c0 5.2 7 13 7 13s7-7.8 7-13a7 7 0 0 0-7-7zm0 9.5A2.5 2.5 0 1 1 12 6.5a2.5 2.5 0 0 1 0 5z"/></svg>' + esc(p.name) + ' <span class="n">' + p.n + '</span>';
+      el.onclick = () => { placeOn = i; [...host.children].forEach((c, j) => c.classList.toggle('on', j === i)); hide(); selected = null; map.flyToBounds(p.b, { padding: [56, 56], maxZoom: 15, duration: 1.3 }); };
+      host.appendChild(el);
+    });
+  }
+  map.on('movestart', () => { if (placeOn >= 0 && !map._flying) { placeOn = -1; [...document.getElementById('places').children].forEach(c => c.classList.remove('on')); } });
+  map.on('zoomstart', () => { map._flying = true; }); map.on('moveend', () => { setTimeout(() => { map._flying = false; }, 50); });
+
+  // ---------- replay: draw every visible track in date order ----------
+  let replayToken = 0;
+  async function replay() {
+    const btn = document.getElementById('bReplay');
+    if (replaying) { replaying = false; replayToken++; return; }
+    const tracks = layers.filter(l => l.kind === 'track' && visible(l.a)); if (!tracks.length) return;
+    replaying = true; const token = ++replayToken; btn.classList.add('hot'); btn.innerHTML = '<svg viewBox="0 0 24 24"><path d="M6 6h12v12H6z"/></svg>Stop';
+    hide(); tracks.forEach(l => map.removeLayer(l.group));
+    const per = Math.max(350, Math.min(1400, 22000 / tracks.length));
+    // Fly to a track's place when it is not on screen, so a year of runs becomes a trip through every city.
+    const ensureView = async (l) => {
+      const b = l.core.getBounds(); const pi = placeList.findIndex(p => p.b.contains(b.getCenter()));
+      if (map.getBounds().contains(b) && map.getZoom() >= 11) return;
+      if (pi >= 0) { placeOn = pi; [...document.getElementById('places').children].forEach((c, j) => c.classList.toggle('on', j === pi)); }
+      await new Promise(res => { let done = false; const fin = () => { if (!done) { done = true; res(); } }; map.once('moveend', fin); map.flyToBounds(pi >= 0 ? placeList[pi].b : b, { padding: [56, 56], maxZoom: 15, duration: 1.4 }); setTimeout(fin, 2400); });
+      await sleep(250);
+    };
+    for (const l of tracks) {
+      if (token !== replayToken) break;
+      await ensureView(l);
+      if (token !== replayToken) break;
+      const full = l.a.poly, c = colorOf(l.a.type);
+      const head = L.marker(full[0], { icon: L.divIcon({ className: 'head-marker', iconSize: [10, 10] }), interactive: false }).addTo(map);
+      head.getElement().style.setProperty('--c', c);
+      const g1 = L.polyline([full[0]], { renderer, color: c, weight: 11, opacity: .10, lineCap: 'round', interactive: false }).addTo(map);
+      const core = L.polyline([full[0]], { renderer, color: c, weight: 3, opacity: .95, lineCap: 'round', interactive: false }).addTo(map);
+      show(l.a, false);
+      const t0 = performance.now();
+      await new Promise(res => { (function frame(now) { if (token !== replayToken) return res(); const f = Math.min(1, (now - t0) / per); const n = Math.max(2, Math.round(f * full.length)); const pts = full.slice(0, n); core.setLatLngs(pts); g1.setLatLngs(pts); head.setLatLng(pts[pts.length - 1]); if (f < 1) requestAnimationFrame(frame); else res(); })(t0); });
+      map.removeLayer(head); map.removeLayer(g1); map.removeLayer(core);
+      if (token === replayToken) l.group.addTo(map);
+      await sleep(60);
+    }
+    tracks.forEach(l => { if (visible(l.a) && !map.hasLayer(l.group)) l.group.addTo(map); });
+    replaying = false; hide(); btn.classList.remove('hot'); btn.innerHTML = '<svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>Replay';
+  }
+  const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+
+  document.getElementById('bFit').onclick = () => fitAll(true);
+  document.getElementById('bLatest').onclick = () => { const l = layers.slice().reverse().find(x => visible(x.a)); if (l) select(l.a, true); };
+  document.getElementById('bReplay').onclick = replay;
+
+  // Focus requests from the Fitness feed (same origin: the feed posts on the top window).
+  function onMsg(ev) { const id = ev.data && ev.data.garminFocus; if (!id) return; const a = acts.find(x => String(x.id) === String(id)); if (a) { if (filterOff.has(a.type)) { filterOff.delete(a.type); chips(); applyFilter(); } select(a, true); } }
+  window.addEventListener('message', onMsg);
+  try { window.parent.addEventListener('message', onMsg); } catch (e) {}
+
+  // Follow the parent's theme toggle without a reload.
+  setInterval(() => { const d = wantDark(); if (d !== dark) { dark = d; document.documentElement.dataset.theme = d ? 'dark' : 'light'; tiles.setUrl(TILES[d ? 'dark' : 'light'][0]); labels.setUrl(TILES[d ? 'dark' : 'light'][1]); layers.forEach(l => map.removeLayer(l.group)); build(); chips(); places(); } }, 2500);
+
+  // ---------- load ----------
+  fetch('/local/garmin/activities.json?v=' + Date.now(), { cache: 'no-store' })
+    .then(r => r.ok ? r.json() : Promise.reject(r.status))
+    .then(d => { acts = (d.activities || []); build(); chips(); places();
+      if (placeList.length > 1) { placeOn = 0; document.getElementById('places').children[0].classList.add('on'); map.fitBounds(placeList[0].b, { padding: [56, 56], maxZoom: 15, animate: false }); } else fitAll(false);
+      const f = q.get('focus'); if (f) onMsg({ data: { garminFocus: f } }); })
+    .catch(e => { empty.innerHTML = '<b>No activities yet</b>the first sync has not run (' + e + ')'; });
+})();
+</script>
+</body>
+</html>

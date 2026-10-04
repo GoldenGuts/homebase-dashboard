@@ -1,0 +1,59 @@
+# Garmin activities: every activity + GPS track, for the Fitness view's map and activity feed.
+#
+# bin/garmin_activities.py runs inside the HA core container (it reuses the Garmin Connect
+# integration's bearer token; see the script header), keeps /config/www/garmin/activities.json
+# up to date and prints a small JSON summary that becomes sensor.garmin_activities:
+#   state       = number of activities stored
+#   attributes  = week / month / year totals, 12 weekly buckets, last 8 activities, type counts
+# The map page www/garmin/map.html reads /local/garmin/activities.json directly.
+#
+# The first run pages through the whole history (list only), then fetches 40 GPS tracks per run
+# until `pending` reaches 0, so a long history fills in over a few runs.
+
+command_line:
+  - sensor:
+      name: Garmin activities
+      unique_id: garmin_activities
+      icon: mdi:map-marker-path
+      command: "python3 /config/bin/garmin_activities.py sync"
+      value_template: "{{ value_json.state }}"
+      json_attributes:
+        - updated
+        - pending
+        - week
+        - last_week
+        - month
+        - year
+        - all
+        - tracks
+        - places
+        - types
+        - weeks
+        - streak_weeks
+        - active_days_30
+        - last
+      scan_interval: 1800
+      command_timeout: 170
+
+automation:
+  - id: garmin_activities_refresh_on_new
+    alias: "Garmin activities · refresh when a new activity syncs"
+    description: "The Garmin integration sees a new activity -> pull it (and its track) right away."
+    mode: single
+    triggers:
+      - trigger: state
+        entity_id: sensor.garmin_connect_last_activity
+    conditions:
+      - condition: template
+        value_template: "{{ trigger.to_state.state not in ['unknown', 'unavailable'] }}"
+    actions:
+      - delay: "00:00:20"
+      - action: homeassistant.update_entity
+        target:
+          entity_id: sensor.garmin_activities
+
+# The integration's route sensor carries the whole polyline as an attribute: keep it out of the db.
+recorder:
+  exclude:
+    entities:
+      - sensor.garmin_connect_last_activity_route

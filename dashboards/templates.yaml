@@ -1,0 +1,874 @@
+# button-card templates shared by every view. Included from home.yaml.
+# NOTE: button-card does not merge extra_styles between a template and a card. Every template
+# below repeats the shared CSS block (same content as in `glass`). Cards in home.yaml that set
+# their own extra_styles must also repeat it (see the SHARED comment there).
+glass:
+  styles:
+    card:
+      - background: var(--card-background-color)
+      - border: 1px solid var(--ha-card-border-color)
+      - border-radius: 22px
+      - box-shadow: var(--ha-card-box-shadow)
+      - padding: 18px 20px
+      - font-family: var(--primary-font-family)
+      - font-size: 14px
+      - line-height: 1.35
+  extra_styles: |
+    .tag { font-size:10px; text-transform:uppercase; letter-spacing:1px; color:var(--nc-muted); font-weight:700; }
+    .mid { font-size:22px; font-weight:700; letter-spacing:-.5px; line-height:1.15; }
+    .muted { color:var(--nc-muted); font-size:12px; }
+    .row { display:flex; align-items:center; gap:12px; }
+    .row.between > .muted { min-width:0; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+    .between { justify-content:space-between; }
+    .grow { flex:1; min-width:0; }
+    .pill { display:inline-flex; align-items:center; gap:6px; padding:5px 10px; border-radius:999px; font-size:11px; font-weight:700; background:var(--nc-surface-2); color:var(--primary-text-color); }
+    .dot { width:9px; height:9px; border-radius:50%; display:inline-block; flex:none; }
+    .bar { height:6px; border-radius:999px; background:var(--nc-track); overflow:hidden; display:block; }
+    .bar i { display:block; height:100%; border-radius:999px; }
+    .item { display:flex; align-items:center; gap:10px; font-size:13px; min-width:0; }
+    .item .ico { width:34px; height:34px; border-radius:12px; display:grid; place-items:center; flex:none; }
+    .item .grow > div { white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+    .stat4 { display:grid; grid-template-columns:1fr 1fr; gap:12px 14px; }
+    .stat4 .st { border-left:3px solid var(--c); padding-left:10px; min-width:0; }
+    .stat4 .mid { font-size:20px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+    .urow { display:flex; align-items:center; gap:10px; font-size:13px; margin:7px 0; }
+    .urow .bar { width:80px; }
+    ha-icon { margin:0; }
+
+# Tinted device tile: a big icon only. The whole tile toggles. Variables: grad, ink
+device_tile:
+  template: glass
+  show_state: false
+  show_label: false
+  show_icon: true
+  show_name: false
+  size: 44px
+  tap_action: { action: toggle }
+  hold_action: { action: more-info }
+  variables:
+    grad: var(--grad-orange)
+    ink: "#1b1206"
+  styles:
+    grid:
+      - grid-template-areas: '"i"'
+      - grid-template-columns: 1fr
+    card:
+      - height: 112px
+      - padding: 0
+      - border-radius: 18px
+      - background: "[[[ return entity && ['on','playing','home','Unlocked','connected','paused','idle'].includes(entity.state) ? variables.grad : 'var(--nc-surface-2)'; ]]]"
+      - color: "[[[ return entity && ['on','playing','home','Unlocked','connected','paused','idle'].includes(entity.state) ? variables.ink : 'var(--nc-muted)'; ]]]"
+      - border: none
+      - box-shadow: "[[[ return entity && ['on','playing','home','Unlocked','connected','paused','idle'].includes(entity.state) ? '0 10px 26px rgba(0,0,0,.35)' : 'none'; ]]]"
+      - transition: background .3s, color .3s
+    icon:
+      - width: 44px
+      - color: inherit
+      - filter: "[[[ return entity && ['on','playing','home','Unlocked','connected','paused','idle'].includes(entity.state) ? 'drop-shadow(0 4px 10px rgba(0,0,0,.25))' : 'none'; ]]]"
+
+# Candy Pop gradient pill button. Variables: grad, ink
+pill:
+  show_icon: false
+  show_name: true
+  size: 14px
+  variables:
+    grad: var(--grad-pink)
+    ink: "#ffffff"
+  styles:
+    card:
+      - background: "[[[ return variables.grad; ]]]"
+      - color: "[[[ return variables.ink; ]]]"
+      - border-radius: 999px
+      - padding: 9px 12px
+      - font-size: 11px
+      - font-weight: 800
+      - letter-spacing: .5px
+      - box-sizing: border-box
+      - box-shadow: 0 6px 16px rgba(0,0,0,.4)
+      - border: none
+    grid:
+      - grid-template-areas: '"i n"'
+      - grid-template-columns: min-content auto
+      - column-gap: 6px
+      - justify-content: center
+    icon:
+      - color: "[[[ return variables.ink; ]]]"
+    name:
+      - white-space: nowrap
+
+# Ring gauge used on the Fitness view. Variables: pct (0-100) via --pct on the card
+ring:
+  template: glass
+  show_icon: false
+  show_state: true
+  show_label: true
+  variables:
+    pct: 0
+    sub: ""
+  styles:
+    card:
+      - text-align: center
+      - padding: 18px 12px
+    grid:
+      - grid-template-areas: '"n" "s" "l"'
+    name:
+      - font-size: 14px
+      - font-weight: 600
+      - margin-bottom: 10px
+      - position: relative
+      - z-index: 1
+    state:
+      - font-size: 40px
+      - font-weight: 700
+      - letter-spacing: -1.5px
+      - width: 150px
+      - height: 150px
+      - margin: 0 auto
+      - display: grid
+      - place-items: center
+      - border-radius: 50%
+      - border: 14px solid transparent
+      - box-sizing: content-box
+      - background: >
+          [[[ return 'var(--nc-ring-face) padding-box, conic-gradient(from 210deg, transparent var(--pct), var(--nc-track) var(--pct)) border-box, conic-gradient(from 210deg, #22e3a1, #3ec6ff 35%, #7b61ff 60%, #ff4f81 100%) border-box'; ]]]
+      - box-shadow: 0 0 24px rgba(62,198,255,.35)
+      - position: relative
+    label:
+      - font-size: 12px
+      - color: var(--secondary-text-color)
+      - margin-top: 10px
+  extra_styles: |
+    .tag { font-size:10px; text-transform:uppercase; letter-spacing:1px; color:var(--nc-muted); font-weight:700; }
+    .mid { font-size:22px; font-weight:700; letter-spacing:-.5px; line-height:1.15; }
+    .muted { color:var(--nc-muted); font-size:12px; }
+    .row { display:flex; align-items:center; gap:12px; }
+    .row.between > .muted { min-width:0; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+    .between { justify-content:space-between; }
+    .grow { flex:1; min-width:0; }
+    .pill { display:inline-flex; align-items:center; gap:6px; padding:5px 10px; border-radius:999px; font-size:11px; font-weight:700; background:var(--nc-surface-2); color:var(--primary-text-color); }
+    .dot { width:9px; height:9px; border-radius:50%; display:inline-block; flex:none; }
+    .bar { height:6px; border-radius:999px; background:var(--nc-track); overflow:hidden; display:block; }
+    .bar i { display:block; height:100%; border-radius:999px; }
+    .item { display:flex; align-items:center; gap:10px; font-size:13px; min-width:0; }
+    .item .ico { width:34px; height:34px; border-radius:12px; display:grid; place-items:center; flex:none; }
+    .item .grow > div { white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+    .stat4 { display:grid; grid-template-columns:1fr 1fr; gap:12px 14px; }
+    .stat4 .st { border-left:3px solid var(--c); padding-left:10px; min-width:0; }
+    .stat4 .mid { font-size:20px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+    .urow { display:flex; align-items:center; gap:10px; font-size:13px; margin:7px 0; }
+    .urow .bar { width:80px; }
+    ha-icon { margin:0; }
+
+# One row: icon chip + name + progress bar + value. Variables: color, pct
+usage_row:
+  show_icon: true
+  show_name: true
+  show_state: true
+  size: 16px
+  variables:
+    color: var(--neon-cyan)
+    pct: 0
+  styles:
+    grid:
+      - grid-template-areas: '"i n s" "i bar bar"'
+      - grid-template-columns: 40px 1fr auto
+      - column-gap: 10px
+      - row-gap: 4px
+    card:
+      - background: none
+      - border: none
+      - box-shadow: none
+      - padding: 6px 0
+    icon:
+      - width: 18px
+      - color: "[[[ return variables.color; ]]]"
+    img_cell:
+      - width: 34px
+      - height: 34px
+      - border-radius: 12px
+      - background: "[[[ return 'color-mix(in srgb, ' + variables.color + ' 20%, transparent)'; ]]]"
+    name:
+      - justify-self: start
+      - font-size: 13px
+      - font-weight: 600
+    state:
+      - font-size: 12px
+      - color: var(--secondary-text-color)
+  custom_fields:
+    bar: >
+      [[[ return '<div style="height:6px;border-radius:999px;background:var(--nc-track);overflow:hidden"><div style="width:' + (Number(variables.pct)||0) + '%;height:100%;background:' + variables.color + '"></div></div>'; ]]]
+  extra_styles: |
+    #bar { grid-area: bar; }
+
+# Round remote key. Variables: color, bg
+remote_key:
+  show_icon: true
+  show_name: false
+  size: 20px
+  variables:
+    color: var(--primary-text-color)
+    bg: var(--nc-key)
+  styles:
+    card:
+      - width: 40px
+      - height: 40px
+      - border-radius: 50%
+      - margin: 0
+      - padding: 0
+      - background: "[[[ return variables.bg; ]]]"
+      - border: 1px solid var(--nc-key-border)
+      - box-shadow: 0 4px 12px rgba(0,0,0,.4)
+    icon:
+      - color: "[[[ return variables.color; ]]]"
+
+# Small chip button: icon + text, tinted by variables.color. Used for actions inside cards.
+# No `width` in styles.card: button-card turns any card width into host `max-width: fit-content`,
+# which shrinks the chip to its text instead of filling its grid cell.
+chip:
+  show_icon: true
+  show_name: true
+  size: 16px
+  variables:
+    color: var(--neon-cyan)
+  styles:
+    grid:
+      - grid-template-areas: '"i n"'
+      - grid-template-columns: min-content auto
+      - column-gap: 6px
+      - justify-content: center
+    card:
+      - border-radius: 999px
+      - padding: 8px 12px
+      - border: none
+      - box-shadow: none
+      - box-sizing: border-box
+      - background: "[[[ return 'color-mix(in srgb, ' + variables.color + ' 16%, var(--nc-surface-2))'; ]]]"
+      - color: var(--primary-text-color)
+      - font-size: 12px
+      - font-weight: 700
+    icon:
+      - color: "[[[ return variables.color; ]]]"
+      - width: 16px
+    name:
+      - white-space: nowrap
+      - overflow: hidden
+      - text-overflow: ellipsis
+
+# Hero call-to-action bar (mockup .cta): orange dot, bold text with green accent, arrow.
+cta:
+  show_icon: false
+  show_name: true
+  show_label: true
+  styles:
+    grid:
+      - grid-template-areas: '"dot n arrow" "dot l arrow"'
+      - grid-template-columns: 40px minmax(0,1fr) 34px
+      - column-gap: 14px
+      - row-gap: 1px
+      - align-items: center
+    card:
+      - background: var(--nc-cta)
+      - border-radius: 16px
+      - padding: 12px 14px
+      - border: none
+      - box-shadow: none
+      - color: var(--nc-cta-ink)
+      - text-align: left
+    name:
+      - justify-self: start
+      - font-size: 15px
+      - font-weight: 700
+      - white-space: nowrap
+      - overflow: hidden
+      - text-overflow: ellipsis
+      - max-width: 100%
+    label:
+      - justify-self: start
+      - font-size: 12px
+      - color: var(--nc-muted)
+      - white-space: nowrap
+      - overflow: hidden
+      - text-overflow: ellipsis
+      - max-width: 100%
+    custom_fields:
+      dot: [ grid-area: dot ]
+      arrow: [ grid-area: arrow ]
+  custom_fields:
+    dot: '<div style="width:40px;height:40px;border-radius:50%;background:#ff9f2e33;display:grid;place-items:center;color:#ff9f2e;font-size:18px">◉</div>'
+    arrow: '<div style="width:34px;height:34px;border-radius:50%;background:var(--nc-hero-ink);color:var(--card-background-color);display:grid;place-items:center;font-weight:700">→</div>'
+  extra_styles: |
+    #name span { color:#4dff5c; }
+
+# Big glowing 270° gauge (mockup "knob") with two stats under it and optional rows.
+# Variables: title, pct, value, sub, stat_a_value/label, stat_b_value/label, rows (HTML)
+knob:
+  template: glass
+  show_icon: false
+  show_name: false
+  show_state: false
+  variables:
+    title: ""
+    pct: 0
+    value: "—"
+    sub: ""
+    stat_a_value: ""
+    stat_a_label: ""
+    stat_b_value: ""
+    stat_b_label: ""
+    rows: ""
+  styles:
+    grid: [ grid-template-areas: '"h" "k" "s" "r"', grid-template-columns: "minmax(0,1fr)" ]
+    custom_fields:
+      h: [ width: 100%, text-align: left ]
+      k: [ width: 100% ]
+      s: [ width: 100% ]
+      r: [ width: 100%, text-align: left ]
+  custom_fields:
+    h: "[[[ return '<div class=\"row between\"><b style=\"font-size:14px\">' + variables.title + '</b><span class=\"muted\">' + variables.sub + '</span></div>'; ]]]"
+    k: >
+      [[[ var p = Math.max(0, Math.min(100, Number(variables.pct)||0)) / 100;
+          var r = 100, C = 2 * Math.PI * r, arc = 0.75 * C, fill = Math.max(0.001, p * arc);
+          var id = 'g' + Math.floor(Math.random() * 1e6);
+          return '<div class="kwrap"><svg viewBox="0 0 232 232" width="232" height="232">'
+            + '<defs><linearGradient id="' + id + '" x1="0" y1="1" x2="1" y2="0"><stop offset="0" stop-color="#22e3a1"/><stop offset=".4" stop-color="#3ec6ff"/><stop offset=".7" stop-color="#7b61ff"/><stop offset="1" stop-color="#ff4f81"/></linearGradient>'
+            + '<filter id="' + id + 'b" x="-30%" y="-30%" width="160%" height="160%"><feGaussianBlur stdDeviation="6"/></filter></defs>'
+            + '<g transform="rotate(135 116 116)">'
+            + '<circle cx="116" cy="116" r="' + r + '" fill="none" stroke="var(--nc-track)" stroke-width="14" stroke-linecap="round" stroke-dasharray="' + arc + ' ' + C + '"/>'
+            + '<circle cx="116" cy="116" r="' + r + '" fill="none" stroke="url(#' + id + ')" stroke-width="14" stroke-linecap="round" stroke-dasharray="' + fill + ' ' + C + '" opacity=".55" filter="url(#' + id + 'b)"/>'
+            + '<circle cx="116" cy="116" r="' + r + '" fill="none" stroke="url(#' + id + ')" stroke-width="14" stroke-linecap="round" stroke-dasharray="' + fill + ' ' + C + '"/>'
+            + '</g></svg><div class="knob"><div class="v">' + variables.value + '</div></div></div>'; ]]]
+    s: >
+      [[[ return variables.stat_a_label ? '<div class="kstats"><div><div class="mid">' + variables.stat_a_value + '</div><div class="muted">' + variables.stat_a_label + '</div></div><div><div class="mid">' + variables.stat_b_value + '</div><div class="muted">' + variables.stat_b_label + '</div></div></div>' : ''; ]]]
+    r: "[[[ return variables.rows || ''; ]]]"
+  extra_styles: |
+    .tag { font-size:10px; text-transform:uppercase; letter-spacing:1px; color:var(--nc-muted); font-weight:700; }
+    .mid { font-size:22px; font-weight:700; letter-spacing:-.5px; line-height:1.15; }
+    .muted { color:var(--nc-muted); font-size:12px; }
+    .row { display:flex; align-items:center; gap:12px; }
+    .row.between > .muted { min-width:0; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+    .between { justify-content:space-between; }
+    .grow { flex:1; min-width:0; }
+    .pill { display:inline-flex; align-items:center; gap:6px; padding:5px 10px; border-radius:999px; font-size:11px; font-weight:700; background:var(--nc-surface-2); color:var(--primary-text-color); }
+    .dot { width:9px; height:9px; border-radius:50%; display:inline-block; flex:none; }
+    .bar { height:6px; border-radius:999px; background:var(--nc-track); overflow:hidden; display:block; }
+    .bar i { display:block; height:100%; border-radius:999px; }
+    .item { display:flex; align-items:center; gap:10px; font-size:13px; min-width:0; }
+    .item .ico { width:34px; height:34px; border-radius:12px; display:grid; place-items:center; flex:none; }
+    .item .grow > div { white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+    .stat4 { display:grid; grid-template-columns:1fr 1fr; gap:12px 14px; }
+    .stat4 .st { border-left:3px solid var(--c); padding-left:10px; min-width:0; }
+    .stat4 .mid { font-size:20px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+    .urow { display:flex; align-items:center; gap:10px; font-size:13px; margin:7px 0; }
+    .urow .bar { width:80px; }
+    ha-icon { margin:0; }
+    .kwrap { position:relative; width:232px; height:232px; margin:10px auto 6px; }
+    .kwrap svg { position:absolute; inset:0; overflow:visible; }
+    .knob { position:absolute; inset:30px; border-radius:50%; display:grid; place-items:center; }
+    .knob .v { font-size:44px; font-weight:700; letter-spacing:-2px; }
+    .kstats { display:grid; grid-template-columns:1fr 1fr; text-align:center; margin-top:6px; }
+    .kstats > div:first-child { border-right:1px solid var(--nc-track); }
+    .kstats .mid { font-size:22px; }
+
+# Floating "now playing" panel, styled like the iOS 26 Lock Screen (Liquid Glass) player:
+# frosted glass over the blurred artwork, centered title + tinted artist, time row with a thin bar,
+# and large white glyphs (rewind / pause / fast-forward) with no filled circle.
+# Follows whichever player plays, else the last paused one, else the first available player.
+now_bar:
+  show_icon: false
+  show_name: false
+  show_label: false
+  variables:
+    players: ['media_player.bedroom_fire_tv','media_player.music_speaker','media_player.bedroom_soundbar']
+    pick: >
+      [[[
+        var list = variables.players || [];
+        for (var i = 0; i < list.length; i++) { var e = states[list[i]]; if (e && e.state === 'playing') return e; }
+        for (var i = 0; i < list.length; i++) { var e = states[list[i]]; if (e && e.state === 'paused') return e; }
+        for (var i = 0; i < list.length; i++) { var e = states[list[i]]; if (e && !['unavailable','unknown'].includes(e.state)) return e; }
+        return entity || null;
+      ]]]
+  tap_action: >
+    [[[ var e = variables.pick; return { action: 'more-info', entity: e ? e.entity_id : 'media_player.music_speaker' }; ]]]
+  custom_fields:
+    bg: >
+      [[[
+        var e = variables.pick; var a = e ? e.attributes : {};
+        return a.entity_picture ? '<div class="bg" style="background-image:url(' + a.entity_picture + ')"></div>' : '';
+      ]]]
+    head: >
+      [[[
+        var e = variables.pick; var a = e ? e.attributes : {};
+        var off = !e || ['unavailable','off','standby','unknown'].includes(e.state);
+        var playing = e && e.state === 'playing';
+        var title = off ? 'Nothing playing' : (a.media_title || a.app_name || (playing ? 'Playing' : 'Paused'));
+        var dev = (a.friendly_name || '').replace(/^Bedroom /i, '');
+        var sub = off ? 'Tap play to start music' : (a.media_artist || a.media_series_title || a.app_name || dev);
+        var eq = playing ? '<span class="eq"><i></i><i></i><i></i><i></i><i></i></span>' : '<span class="eq idle"><i></i><i></i><i></i><i></i><i></i></span>';
+        return '<div class="t">' + title + '</div><div class="s">' + sub + '</div>' + eq;
+      ]]]
+    star:
+      card:
+        type: custom:button-card
+        template: bar_key
+        icon: mdi:star-outline
+        variables: { small: true }
+        tap_action:
+          action: more-info
+          entity: media_player.music_speaker
+    prev:
+      card:
+        type: custom:button-card
+        template: bar_key
+        icon: mdi:rewind
+        tap_action: >
+          [[[ var list = ['media_player.bedroom_fire_tv','media_player.music_speaker','media_player.bedroom_soundbar']; var t = null; for (var i=0;i<list.length;i++){ var e = states[list[i]]; if (e && (e.state==='playing'||e.state==='paused')) { t = e; break; } }
+              return { action: 'call-service', service: 'media_player.media_previous_track', target: { entity_id: t ? t.entity_id : 'media_player.music_speaker' } }; ]]]
+    play:
+      card:
+        type: custom:button-card
+        template: bar_key
+        variables: { primary: true }
+        icon: >
+          [[[ var list = ['media_player.bedroom_fire_tv','media_player.music_speaker','media_player.bedroom_soundbar'];
+              for (var i=0;i<list.length;i++){ var e = states[list[i]]; if (e && e.state==='playing') return 'mdi:pause'; }
+              return 'mdi:play'; ]]]
+        triggers_update: ['media_player.bedroom_fire_tv','media_player.music_speaker','media_player.bedroom_soundbar']
+        tap_action: >
+          [[[ var list = ['media_player.bedroom_fire_tv','media_player.music_speaker','media_player.bedroom_soundbar']; var t = null; for (var i=0;i<list.length;i++){ var e = states[list[i]]; if (e && (e.state==='playing'||e.state==='paused')) { t = e; break; } }
+              return t ? { action: 'call-service', service: 'media_player.media_play_pause', target: { entity_id: t.entity_id } }
+                       : { action: 'call-service', service: 'script.resume_music' }; ]]]
+    next:
+      card:
+        type: custom:button-card
+        template: bar_key
+        icon: mdi:fast-forward
+        tap_action: >
+          [[[ var list = ['media_player.bedroom_fire_tv','media_player.music_speaker','media_player.bedroom_soundbar']; var t = null; for (var i=0;i<list.length;i++){ var e = states[list[i]]; if (e && (e.state==='playing'||e.state==='paused')) { t = e; break; } }
+              return { action: 'call-service', service: 'media_player.media_next_track', target: { entity_id: t ? t.entity_id : 'media_player.music_speaker' } }; ]]]
+    air:
+      card:
+        type: custom:button-card
+        template: bar_key
+        icon: mdi:cast-audio-variant
+        variables: { small: true }
+        tap_action: >
+          [[[ var list = ['media_player.bedroom_fire_tv','media_player.music_speaker','media_player.bedroom_soundbar']; var t = null; for (var i=0;i<list.length;i++){ var e = states[list[i]]; if (e && (e.state==='playing'||e.state==='paused')) { t = e; break; } }
+              return { action: 'more-info', entity: t ? t.entity_id : 'media_player.bedroom_soundbar' }; ]]]
+    prog: >
+      [[[
+        var e = variables.pick; var a = e ? e.attributes : {};
+        var pct = 0, pos = 0, dur = Number(a.media_duration || 0);
+        if (dur && a.media_position !== undefined) {
+          pos = Number(a.media_position);
+          if (e.state === 'playing' && a.media_position_updated_at) pos += (Date.now() - new Date(a.media_position_updated_at).getTime()) / 1000;
+          pos = Math.max(0, Math.min(dur, pos));
+          pct = 100 * pos / dur;
+        }
+        function f(x) { x = Math.round(x); var h = Math.floor(x / 3600), m = Math.floor((x % 3600) / 60), s = x % 60; return (h ? h + ':' + String(m).padStart(2,'0') : m) + ':' + String(s).padStart(2,'0'); }
+        var l = dur ? f(pos) : '0:00', r = dur ? '-' + f(dur - pos) : '-0:00';
+        return '<span class="tm">' + l + '</span><div class="bar"><div style="width:' + pct.toFixed(1) + '%"></div></div><span class="tm r">' + r + '</span>';
+      ]]]
+  styles:
+    grid:
+      - grid-template-areas: '"head head head head head head head" "prog prog prog prog prog prog prog" "star . prev play next . air"'
+      - grid-template-columns: 40px 1fr 44px 56px 44px 1fr 40px
+      - grid-template-rows: auto auto auto
+      - column-gap: 12px
+      - row-gap: 8px
+      - align-items: center
+    card:
+      - position: fixed
+      - bottom: calc(14px + env(safe-area-inset-bottom))
+      - left: 50%
+      - transform: translateX(-50%)
+      - width: min(640px, calc(100vw - 24px))
+      - box-sizing: border-box
+      - z-index: 6
+      - padding: 12px 26px 10px
+      - border-radius: 999px
+      - border: none
+      - background: color-mix(in srgb, var(--card-background-color) 22%, transparent)
+      - backdrop-filter: blur(22px) saturate(170%)
+      - -webkit-backdrop-filter: blur(22px) saturate(170%)
+      - box-shadow: 0 0 0 0.5px color-mix(in srgb, var(--primary-text-color) 10%, transparent), inset 0 0 0 1px rgba(255,255,255,.45), inset 0 1px 0 rgba(255,255,255,.7), 0 24px 50px -14px rgba(0,0,0,.45), 0 2px 8px rgba(0,0,0,.12)
+      - color: var(--primary-text-color)
+      - overflow: hidden
+    custom_fields:
+      bg: [ position: absolute, inset: 0, z-index: 0, pointer-events: none ]
+      head: [ position: relative, z-index: 1, text-align: center, width: 100%, min-width: 0 ]
+      prog: [ position: relative, z-index: 1, width: 100%, display: flex, align-items: center, gap: 8px, padding: 0 4px ]
+      star: [ justify-self: start, z-index: 1 ]
+      prev: [ justify-self: center, z-index: 1 ]
+      play: [ justify-self: center, z-index: 1 ]
+      next: [ justify-self: center, z-index: 1 ]
+      air: [ justify-self: end, z-index: 1 ]
+  extra_styles: |
+    /* blurred artwork fills the glass like the iOS 26 lock screen; text goes white on top of it */
+    .bg { position:absolute; inset:-30px; background:center/cover no-repeat; filter:blur(28px) saturate(160%) brightness(.7); }
+    .bg:after { content:""; position:absolute; inset:0; background:rgba(255,255,255,.08); }
+    ha-card:has(.bg) { color:#fff; }
+    ha-card:has(.bg) .s { color:rgba(255,255,255,.72); }
+    ha-card:has(.bg) .tm { color:rgba(255,255,255,.65); }
+    ha-card:has(.bg) .bar { background:rgba(255,255,255,.28); }
+    ha-card:has(.bg) .bar > div { background:#fff; }
+    ha-card:has(.bg) .bar > div:after { background:#fff; }
+    ha-card:has(.bg) .eq i { background:rgba(255,255,255,.85); }
+    /* glass sheen: bright top edge, soft inner highlight (Liquid Glass) */
+    ha-card:before { content:""; position:absolute; inset:0; border-radius:inherit; background:linear-gradient(180deg, rgba(255,255,255,.26), rgba(255,255,255,.04) 40%, rgba(255,255,255,0) 70%, rgba(255,255,255,.08)); pointer-events:none; z-index:0; }
+    .t { font-size:15px; font-weight:700; letter-spacing:.2px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; padding:0 40px; }
+    .s { font-size:14px; font-weight:500; color:var(--secondary-text-color); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; margin-top:2px; padding:0 40px; }
+    .eq { position:absolute; right:12px; top:4px; height:12px; display:flex; align-items:flex-end; gap:2px; opacity:.85; }
+    .eq i { width:2px; border-radius:1px; background:var(--primary-text-color); height:3px; animation:eqb 1.1s ease-in-out infinite; }
+    .eq i:nth-child(2) { animation-delay:.15s } .eq i:nth-child(3) { animation-delay:.3s } .eq i:nth-child(4) { animation-delay:.45s } .eq i:nth-child(5) { animation-delay:.6s }
+    .eq.idle i { animation:none; height:3px; opacity:.5; }
+    @keyframes eqb { 0%,100% { height:3px } 50% { height:12px } }
+    .tm { font-size:11px; font-weight:600; font-variant-numeric:tabular-nums; color:var(--secondary-text-color); min-width:30px; }
+    .tm.r { text-align:right; }
+    .bar { flex:1; height:4px; border-radius:999px; background:color-mix(in srgb, var(--primary-text-color) 18%, transparent); position:relative; }
+    .bar > div { height:100%; background:var(--primary-text-color); border-radius:999px; position:relative; transition:width 1s linear; }
+    .bar > div:after { content:""; position:absolute; right:-4px; top:50%; width:8px; height:8px; border-radius:50%; background:var(--primary-text-color); transform:translateY(-50%); box-shadow:0 1px 3px rgba(0,0,0,.3); }
+
+# Glyph inside the floating panel. Variables: primary (the big pause/play glyph), small (the side icons)
+bar_key:
+  show_icon: true
+  show_name: false
+  variables:
+    primary: false
+    small: false
+  styles:
+    card:
+      - width: "[[[ return variables.primary ? '56px' : (variables.small ? '40px' : '44px'); ]]]"
+      - height: 44px
+      - border-radius: 14px
+      - margin: 0
+      - padding: 0
+      - border: none
+      - box-shadow: none
+      - background: transparent
+    icon:
+      - color: inherit
+      - opacity: "[[[ return variables.small ? '.8' : '1'; ]]]"
+      - width: "[[[ return variables.primary ? '36px' : (variables.small ? '22px' : '30px'); ]]]"
+      - filter: drop-shadow(0 1px 2px rgba(0,0,0,.25))
+
+# One transaction row of the spend card, from sensor.spend_feed attributes.recent[i].
+# tap = move to the next category (food -> subs -> travel -> shopping -> other), hold = mark reimbursed.
+txn_row:
+  entity: sensor.spend_feed
+  triggers_update: [sensor.spend_feed]
+  show_icon: false
+  show_name: false
+  show_state: false
+  variables:
+    i: 0
+  styles:
+    card:
+      - background: none
+      - border: none
+      - box-shadow: none
+      - border-radius: 10px
+      - padding: 0
+      - margin: 0
+      - font-family: var(--primary-font-family)
+      - font-size: 13px
+      - text-align: left
+    grid:
+      - grid-template-areas: '"r"'
+      - grid-template-columns: minmax(0,1fr)
+    custom_fields:
+      r:
+        - width: 100%
+        - min-width: 0
+        - text-align: left
+        - justify-self: stretch
+  custom_fields:
+    r: >
+      [[[
+        var x = ((((states['sensor.spend_feed']||{}).attributes||{}).recent)||[])[variables.i];
+        if (!x) return '';
+        var C = {food:['#ffb347','Food'], subs:['#ff5c8a','Subs'], travel:['#4fd7ff','Travel'], shopping:['#c6f04a','Shop'], other:['#9d7bff','Other']};
+        var c = C[x.category] || C.other;
+        var d = new Date(x.ts * 1000); var now = new Date();
+        var same = (a,b) => a.toDateString() === b.toDateString();
+        var y = new Date(now); y.setDate(now.getDate() - 1);
+        var when = same(d, now) ? 'Today' : same(d, y) ? 'Yesterday' : d.getDate() + ' ' + ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][d.getMonth()];
+        var back = x.kind !== 'debit';
+        var name = x.bill ? x.bill.charAt(0).toUpperCase() + x.bill.slice(1) : x.merchant;
+        return '<div style="display:flex;align-items:center;gap:10px;padding:6px 0;min-width:0">'
+          + '<span style="width:9px;height:9px;border-radius:50%;background:' + c[0] + ';flex:none"></span>'
+          + '<span style="flex:1;min-width:0;text-align:left;white-space:nowrap;overflow:hidden;text-overflow:ellipsis"><b>' + name + '</b> <span style="color:var(--nc-muted);font-size:12px">' + when + (back ? ' · ' + x.kind : '') + '</span></span>'
+          + '<span style="font-variant-numeric:tabular-nums;font-weight:700;' + (back ? 'text-decoration:line-through;color:var(--nc-muted)' : '') + '">₹' + Math.round(x.amount).toLocaleString('en-IN') + '</span>'
+          + '<span style="font-size:10px;font-weight:700;padding:3px 8px;border-radius:999px;background:' + c[0] + '22;color:' + c[0] + ';flex:none;min-width:34px;text-align:center">' + c[1] + '</span>'
+          + '</div>';
+      ]]]
+  tap_action:
+    action: call-service
+    service: script.spend_fix_category
+    data:
+      txn_id: "[[[ var x = ((((states['sensor.spend_feed']||{}).attributes||{}).recent)||[])[variables.i]; return x ? x.id : ''; ]]]"
+      amount: "[[[ var x = ((((states['sensor.spend_feed']||{}).attributes||{}).recent)||[])[variables.i]; return x ? x.amount : 0; ]]]"
+      from_category: "[[[ var x = ((((states['sensor.spend_feed']||{}).attributes||{}).recent)||[])[variables.i]; return x ? x.category : 'other'; ]]]"
+      to_category: "[[[ var x = ((((states['sensor.spend_feed']||{}).attributes||{}).recent)||[])[variables.i]; var o = ['food','subs','travel','shopping','other']; return x ? o[(o.indexOf(x.category) + 1) % o.length] : 'other'; ]]]"
+  hold_action:
+    action: call-service
+    service: script.spend_mark_reimbursed
+    data:
+      txn_id: "[[[ var x = ((((states['sensor.spend_feed']||{}).attributes||{}).recent)||[])[variables.i]; return x ? x.id : ''; ]]]"
+
+
+# Kodi pick menu chip (hero card, packages/media.yaml). variables.idx: -1 = the "continue" slot
+# (also shows the loading / error state), 0..3 = sensor.kodi_menu attribute new[idx].
+# Slots without an item collapse to display:none.
+kodi_pick:
+  template: chip
+  entity: sensor.kodi_menu
+  triggers_update: [sensor.kodi_menu]
+  variables:
+    idx: 0
+    item: >-
+      [[[
+        var s = states['sensor.kodi_menu']; var a = s ? s.attributes : {};
+        return variables.idx < 0 ? (a.continue || null) : ((a.new || [])[variables.idx] || null);
+      ]]]
+    phase: "[[[ var s = states['sensor.kodi_menu']; return s ? s.state : 'unknown'; ]]]"
+    color: "[[[ return variables.idx < 0 ? 'var(--neon-cyan)' : 'var(--nc-muted)'; ]]]"
+  icon: >-
+    [[[
+      if (variables.idx < 0) return variables.item ? 'mdi:play' : (variables.phase === 'loading' ? 'mdi:timer-sand' : 'mdi:alert-circle-outline');
+      var h = variables.item ? variables.item.hint : '';
+      return h === 'next up' ? 'mdi:skip-next' : 'mdi:new-box';
+    ]]]
+  name: >-
+    [[[
+      var it = variables.item;
+      if (variables.idx < 0) {
+        if (it) return 'Continue · ' + it.label + ' · ' + it.left + ' min left';
+        if (variables.phase === 'loading') return 'Starting Kodi…';
+        if (variables.phase === 'error') return 'Kodi did not answer';
+        return 'Nothing to continue';
+      }
+      return it ? it.label + ' · ' + it.hint : '';
+    ]]]
+  tap_action:
+    action: "[[[ return variables.item ? 'call-service' : 'none'; ]]]"
+    service: script.kodi_play
+    data:
+      kind: "[[[ return variables.item ? variables.item.kind : ''; ]]]"
+      id: "[[[ return variables.item ? variables.item.id : 0; ]]]"
+      resume: "[[[ return variables.idx < 0; ]]]"
+  styles:
+    card:
+      - display: >-
+          [[[
+            if (variables.idx >= 0) return variables.item ? 'block' : 'none';
+            var s = states['sensor.kodi_menu']; var n = s && s.attributes.new ? s.attributes.new.length : 0;
+            return (!variables.item && variables.phase === 'ready' && n > 0) ? 'none' : 'block';
+          ]]]
+      - justify-content: flex-start
+    grid:
+      - justify-content: start
+    name:
+      - text-align: left
+
+
+# ---------------------------------------------------------------------------------------------
+# Mac dashboard (dashboards/mac.yaml)
+# ---------------------------------------------------------------------------------------------
+# One Claude Remote Control host (tmux "claude-<folder>") as a row: status dot, name, sessions/age,
+# then one link chip per served session plus "New session" (the host's environment link, which opens
+# the app with this folder preselected - that is how a 2nd/3rd/4th session in the same folder starts).
+# Links are plain anchors (tap_action none + pointer-events auto) so several fit in one row.
+# variables.idx picks sessions_json[idx] from sensor.mac_status; the card hides itself when empty.
+mac_host:
+  entity: sensor.mac_status
+  show_icon: false
+  show_name: false
+  show_state: false
+  tap_action: { action: none }
+  variables:
+    idx: 0
+    host: "[[[ var s = states['sensor.mac_status']; var a = s ? (s.attributes.sessions_json || []) : []; return a[variables.idx] || null; ]]]"
+  styles:
+    card:
+      - display: "[[[ return variables.host ? 'block' : 'none'; ]]]"
+      - pointer-events: auto
+      - padding: 12px 14px
+      - border-radius: 16px
+      - background: var(--nc-surface-2)
+      - border: none
+      - box-shadow: none
+      - margin-top: 8px
+      - font-family: var(--primary-font-family)
+      - font-size: 14px
+      - line-height: 1.35
+    grid: [ grid-template-areas: '"h"', grid-template-columns: "minmax(0,1fr)" ]
+    custom_fields: { h: [ width: 100%, text-align: left ] }
+  custom_fields:
+    h: >
+      [[[
+        var h = variables.host; if (!h) return '';
+        var col = { connected: '#b5e21c', starting: '#ff9f2e', error: '#ff4fa3', duplicate: '#ff4fa3' }[h.status] || '#8a90a3';
+        var mins = Math.max(0, Math.round((Date.now() / 1000 - h.started) / 60));
+        var age = mins < 60 ? mins + ' min' : Math.floor(mins / 60) + 'h ' + (mins % 60) + 'm';
+        var n = h.sessions || (h.status === 'connected' ? 1 : 0);
+        var ico = (i, c) => '<ha-icon icon="' + i + '" style="--mdc-icon-size:13px;color:' + c + '"></ha-icon>';
+        var a = (u, cls, i, c, t) => '<a class="chipa ' + cls + '" href="' + u + '" target="_blank" rel="noopener">' + ico(i, c) + '<span>' + t + '</span></a>';
+        var chips = (h.served || []).map(s => a(s.link, '', 'mdi:open-in-new', '#3fe3ff', s.title)).join('');
+        if (!chips && h.link) chips = a(h.link, '', 'mdi:open-in-new', '#3fe3ff', 'Open');
+        if (h.env_link) chips += a(h.env_link, 'new', 'mdi:plus', '#b5e21c', 'New session');
+        var st = { connected: 'live', starting: 'starting…', error: 'error - see log', duplicate: 'folder served elsewhere' }[h.status] || h.status;
+        return '<div class="row"><span class="dot" style="background:' + col + ';box-shadow:0 0 8px ' + col + '"></span><div class="grow"><b>' + h.name + '</b><div class="muted">'
+          + n + (n === 1 ? ' session' : ' sessions') + ' · ' + age + ' · ' + st + '</div></div></div>' + (chips ? '<div class="chips">' + chips + '</div>' : '');
+      ]]]
+  extra_styles: |
+    .tag { font-size:10px; text-transform:uppercase; letter-spacing:1px; color:var(--nc-muted); font-weight:700; }
+    .mid { font-size:22px; font-weight:700; letter-spacing:-.5px; line-height:1.15; }
+    .muted { color:var(--nc-muted); font-size:12px; }
+    .row { display:flex; align-items:center; gap:12px; }
+    .row.between > .muted { min-width:0; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+    .between { justify-content:space-between; }
+    .grow { flex:1; min-width:0; }
+    .pill { display:inline-flex; align-items:center; gap:6px; padding:5px 10px; border-radius:999px; font-size:11px; font-weight:700; background:var(--nc-surface-2); color:var(--primary-text-color); }
+    .dot { width:9px; height:9px; border-radius:50%; display:inline-block; flex:none; }
+    .bar { height:6px; border-radius:999px; background:var(--nc-track); overflow:hidden; display:block; }
+    .bar i { display:block; height:100%; border-radius:999px; }
+    .item { display:flex; align-items:center; gap:10px; font-size:13px; min-width:0; }
+    .item .ico { width:34px; height:34px; border-radius:12px; display:grid; place-items:center; flex:none; }
+    .item .grow > div { white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+    .stat4 { display:grid; grid-template-columns:1fr 1fr; gap:12px 14px; }
+    .stat4 .st { border-left:3px solid var(--c); padding-left:10px; min-width:0; }
+    .stat4 .mid { font-size:20px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+    .urow { display:flex; align-items:center; gap:10px; font-size:13px; margin:7px 0; }
+    .urow .bar { width:80px; }
+    ha-icon { margin:0; }
+    .chips { display:flex; flex-wrap:wrap; gap:6px; margin-top:8px; }
+    .chipa { display:inline-flex; align-items:center; gap:5px; padding:5px 10px; border-radius:999px; font-size:11px; font-weight:700; background:color-mix(in srgb, var(--neon-cyan) 14%, var(--card-background-color)); color:var(--primary-text-color); text-decoration:none; max-width:100%; min-width:0; }
+    .chipa span { white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+    .chipa.new { background:color-mix(in srgb, var(--neon-lime) 18%, var(--card-background-color)); }
+    .chipa ha-icon { flex:none; }
+
+# Stop button that sits next to a mac_host row (same idx, same hide rule).
+mac_host_stop:
+  template: chip
+  entity: sensor.mac_status
+  show_name: false
+  icon: mdi:stop
+  variables:
+    idx: 0
+    color: var(--neon-pink)
+    host: "[[[ var s = states['sensor.mac_status']; var a = s ? (s.attributes.sessions_json || []) : []; return a[variables.idx] || null; ]]]"
+  tap_action:
+    action: call-service
+    service: script.mac_stop_claude
+    data: { name: "[[[ return variables.host ? variables.host.name : ''; ]]]" }
+    confirmation: { text: "Stop this Claude host? All its sessions close." }
+  styles:
+    card:
+      - display: "[[[ return variables.host ? 'block' : 'none'; ]]]"
+      - width: 40px
+      - height: 40px
+      - padding: 0
+      - margin-top: 8px
+    grid: [ grid-template-areas: '"i"', grid-template-columns: 1fr ]
+
+# One project folder (~/projects/<name>) as a row: git branch, dirty count, last commit age.
+# Tap = select it as the Claude folder (input_text.claude_folder); hold = open it in Antigravity.
+# variables.idx picks projects[idx] from sensor.mac_status (sorted by last activity).
+proj_row:
+  entity: sensor.mac_status
+  triggers_update: [input_text.claude_folder]
+  show_icon: false
+  show_name: false
+  show_state: false
+  variables:
+    idx: 0
+    p: "[[[ var s = states['sensor.mac_status']; var a = s ? (s.attributes.projects || []) : []; return a[variables.idx] || null; ]]]"
+    sel: "[[[ var f = states['input_text.claude_folder']; var v = f ? f.state : ''; while (v.endsWith('/')) v = v.slice(0, -1); return !!(variables.p && v === variables.p.path); ]]]"
+  tap_action:
+    action: call-service
+    service: input_text.set_value
+    target: { entity_id: input_text.claude_folder }
+    data: { value: "[[[ return variables.p ? variables.p.path : ''; ]]]" }
+  hold_action:
+    action: call-service
+    service: script.mac_open_app
+    data: { app: Antigravity, folder: "[[[ return variables.p ? variables.p.path : ''; ]]]" }
+  styles:
+    card:
+      - display: "[[[ return variables.p ? 'block' : 'none'; ]]]"
+      - padding: 10px 12px
+      - border-radius: 14px
+      - background: "[[[ return variables.sel ? 'color-mix(in srgb, var(--neon-purple) 18%, var(--nc-surface-2))' : 'var(--nc-surface-2)'; ]]]"
+      - border: "[[[ return variables.sel ? '1px solid color-mix(in srgb, var(--neon-purple) 45%, transparent)' : '1px solid transparent'; ]]]"
+      - box-shadow: none
+      - margin-top: 6px
+      - font-family: var(--primary-font-family)
+      - font-size: 14px
+      - line-height: 1.3
+      - transition: background .2s
+    grid: [ grid-template-areas: '"h"', grid-template-columns: "minmax(0,1fr)" ]
+    custom_fields: { h: [ width: 100%, text-align: left ] }
+  custom_fields:
+    h: >
+      [[[
+        var p = variables.p; if (!p) return '';
+        var ago = (t) => { if (!t) return ''; var m = Math.round((Date.now() / 1000 - t) / 60); if (m < 60) return m + 'm'; if (m < 1440) return Math.round(m / 60) + 'h'; return Math.round(m / 1440) + 'd'; };
+        var meta, badge;
+        if (p.git) {
+          var parts = [p.branch, p.dirty ? p.dirty + ' changed' : 'clean'];
+          if (p.ahead) parts.push('↑' + p.ahead); if (p.behind) parts.push('↓' + p.behind);
+          meta = parts.join(' · ') + ' · ' + ago(p.last);
+          badge = p.dirty ? '<span class="pill" style="background:color-mix(in srgb,#ff4fa3 18%, var(--card-background-color));color:#ff4fa3">' + p.dirty + '</span>'
+                          : '<ha-icon icon="mdi:check-circle-outline" style="--mdc-icon-size:18px;color:#8fc31f"></ha-icon>';
+        } else { meta = 'no git · ' + ago(p.last); badge = ''; }
+        var ico = variables.sel ? 'mdi:folder-star' : (p.git ? 'mdi:source-branch' : 'mdi:folder-outline');
+        var col = variables.sel ? 'var(--neon-purple)' : 'var(--nc-muted)';
+        return '<div class="row"><ha-icon icon="' + ico + '" style="--mdc-icon-size:20px;color:' + col + ';flex:none"></ha-icon><div class="grow"><b style="font-size:13px">' + p.name + '</b><div class="muted">' + meta + '</div></div>' + badge + '</div>';
+      ]]]
+  extra_styles: |
+    .tag { font-size:10px; text-transform:uppercase; letter-spacing:1px; color:var(--nc-muted); font-weight:700; }
+    .mid { font-size:22px; font-weight:700; letter-spacing:-.5px; line-height:1.15; }
+    .muted { color:var(--nc-muted); font-size:12px; }
+    .row { display:flex; align-items:center; gap:12px; }
+    .row.between > .muted { min-width:0; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+    .between { justify-content:space-between; }
+    .grow { flex:1; min-width:0; }
+    .pill { display:inline-flex; align-items:center; gap:6px; padding:5px 10px; border-radius:999px; font-size:11px; font-weight:700; background:var(--nc-surface-2); color:var(--primary-text-color); }
+    .dot { width:9px; height:9px; border-radius:50%; display:inline-block; flex:none; }
+    .bar { height:6px; border-radius:999px; background:var(--nc-track); overflow:hidden; display:block; }
+    .bar i { display:block; height:100%; border-radius:999px; }
+    .item { display:flex; align-items:center; gap:10px; font-size:13px; min-width:0; }
+    .item .ico { width:34px; height:34px; border-radius:12px; display:grid; place-items:center; flex:none; }
+    .item .grow > div { white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+    .stat4 { display:grid; grid-template-columns:1fr 1fr; gap:12px 14px; }
+    .stat4 .st { border-left:3px solid var(--c); padding-left:10px; min-width:0; }
+    .stat4 .mid { font-size:20px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+    .urow { display:flex; align-items:center; gap:10px; font-size:13px; margin:7px 0; }
+    .urow .bar { width:80px; }
+    ha-icon { margin:0; }
+
+# App tile for the Mac dashboard: device_tile plus the app name under the icon.
+app_tile:
+  template: device_tile
+  show_name: true
+  size: 36px
+  styles:
+    grid:
+      - grid-template-areas: '"i" "n"'
+      - grid-template-columns: 1fr
+      - grid-template-rows: 1fr min-content
+      - row-gap: 2px
+    card:
+      - height: 96px
+      - padding: 10px 6px 12px
+      - box-sizing: border-box
+    icon:
+      - width: 36px
+    name:
+      - font-size: 11px
+      - font-weight: 800
+      - letter-spacing: .3px
+      - white-space: nowrap
+      - overflow: hidden
+      - text-overflow: ellipsis
+      - max-width: 100%

@@ -1,0 +1,211 @@
+# Food / nutrition. Source order: Garmin Connect nutrition sensors (enable them in the
+# Garmin device page; they sync from Garmin's food log or MyFitnessPal) -> manual counters.
+# Manual counters reset at midnight and accept quick adds from the dashboard or the
+# food_log webhook: POST /api/webhook/<food_webhook_id> {"calories":520,"protein":32,"carbs":60,"fat":14,"name":"Dal rice"}
+
+input_number:
+  food_calories:
+    name: Calories eaten (manual)
+    min: 0
+    max: 10000
+    step: 1
+    unit_of_measurement: kcal
+    icon: mdi:food-apple
+    mode: box
+  food_protein:
+    name: Protein eaten (manual)
+    min: 0
+    max: 1000
+    step: 1
+    unit_of_measurement: g
+    icon: mdi:food-drumstick
+    mode: box
+  food_carbs:
+    name: Carbs eaten (manual)
+    min: 0
+    max: 2000
+    step: 1
+    unit_of_measurement: g
+    icon: mdi:rice
+    mode: box
+  food_fat:
+    name: Fat eaten (manual)
+    min: 0
+    max: 500
+    step: 1
+    unit_of_measurement: g
+    icon: mdi:water
+    mode: box
+  food_water_ml:
+    name: Water (manual)
+    min: 0
+    max: 10000
+    step: 250
+    unit_of_measurement: mL
+    icon: mdi:cup-water
+    mode: box
+  goal_calories:
+    name: Calorie goal
+    min: 1000
+    max: 6000
+    step: 50
+    unit_of_measurement: kcal
+    icon: mdi:target
+    initial: 2200
+  goal_protein:
+    name: Protein goal
+    min: 20
+    max: 400
+    step: 5
+    unit_of_measurement: g
+    icon: mdi:target
+    initial: 130
+  goal_water_ml:
+    name: Water goal
+    min: 500
+    max: 6000
+    step: 250
+    unit_of_measurement: mL
+    icon: mdi:target
+    initial: 3000
+
+input_text:
+  last_food_entry:
+    name: Last food entry
+    max: 255
+    icon: mdi:silverware-fork-knife
+
+template:
+  - sensor:
+      # "Best available" values: Garmin when it reports a number, else the manual counters.
+      - name: Nutrition calories
+        unique_id: nutrition_calories
+        unit_of_measurement: kcal
+        icon: mdi:food-apple
+        state_class: measurement
+        state: >
+          {% set g = states('sensor.garmin_connect_nutrition_consumed_calories') %}
+          {{ g | int if is_number(g) else states('input_number.food_calories') | int(0) }}
+        attributes:
+          source: >
+            {{ 'garmin' if is_number(states('sensor.garmin_connect_nutrition_consumed_calories')) else 'manual' }}
+      - name: Nutrition protein
+        unique_id: nutrition_protein
+        unit_of_measurement: g
+        icon: mdi:food-drumstick
+        state: >
+          {% set g = states('sensor.garmin_connect_nutrition_consumed_protein') %}
+          {{ g | int if is_number(g) else states('input_number.food_protein') | int(0) }}
+      - name: Nutrition carbs
+        unique_id: nutrition_carbs
+        unit_of_measurement: g
+        icon: mdi:rice
+        state: >
+          {% set g = states('sensor.garmin_connect_nutrition_consumed_carbohydrates') %}
+          {{ g | int if is_number(g) else states('input_number.food_carbs') | int(0) }}
+      - name: Nutrition fat
+        unique_id: nutrition_fat
+        unit_of_measurement: g
+        icon: mdi:water
+        state: >
+          {% set g = states('sensor.garmin_connect_nutrition_consumed_fat') %}
+          {{ g | int if is_number(g) else states('input_number.food_fat') | int(0) }}
+      - name: Nutrition calorie goal
+        unique_id: nutrition_calorie_goal
+        unit_of_measurement: kcal
+        state: >
+          {% set g = states('sensor.garmin_connect_nutrition_calorie_goal') %}
+          {{ g | int if is_number(g) else states('input_number.goal_calories') | int(2200) }}
+      - name: Water today
+        unique_id: water_today
+        unit_of_measurement: mL
+        icon: mdi:cup-water
+        state: >
+          {% set g = states('sensor.garmin_connect_hydration') %}
+          {{ g | int if is_number(g) else states('input_number.food_water_ml') | int(0) }}
+      # Net calories = eaten - burned (Garmin total burn incl. BMR). Negative = deficit.
+      - name: Calorie balance
+        unique_id: calorie_balance
+        unit_of_measurement: kcal
+        icon: mdi:scale-balance
+        state: >
+          {% set burned = states('sensor.garmin_connect_calories') %}
+          {{ (states('sensor.nutrition_calories') | int(0)) - (burned | int if is_number(burned) else states('sensor.nutrition_calorie_goal') | int(2200)) }}
+
+script:
+  food_add:
+    alias: "Food · quick add"
+    icon: mdi:plus
+    mode: queued
+    fields:
+      calories: { example: 500 }
+      protein: { example: 30 }
+      carbs: { example: 60 }
+      fat: { example: 15 }
+      name: { example: "Lunch" }
+    sequence:
+      - action: input_number.set_value
+        target: { entity_id: input_number.food_calories }
+        data: { value: "{{ [states('input_number.food_calories') | int(0) + (calories | int(0)), 10000] | min }}" }
+      - action: input_number.set_value
+        target: { entity_id: input_number.food_protein }
+        data: { value: "{{ [states('input_number.food_protein') | int(0) + (protein | int(0)), 1000] | min }}" }
+      - action: input_number.set_value
+        target: { entity_id: input_number.food_carbs }
+        data: { value: "{{ [states('input_number.food_carbs') | int(0) + (carbs | int(0)), 2000] | min }}" }
+      - action: input_number.set_value
+        target: { entity_id: input_number.food_fat }
+        data: { value: "{{ [states('input_number.food_fat') | int(0) + (fat | int(0)), 500] | min }}" }
+      - action: input_text.set_value
+        target: { entity_id: input_text.last_food_entry }
+        data: { value: "{{ now().strftime('%H:%M') }} · {{ name | default('Food') }} · {{ calories | int(0) }} kcal" }
+  water_add:
+    alias: "Water · add a glass"
+    icon: mdi:cup-water
+    fields:
+      ml: { example: 250 }
+    sequence:
+      - action: input_number.set_value
+        target: { entity_id: input_number.food_water_ml }
+        data: { value: "{{ [states('input_number.food_water_ml') | int(0) + (ml | int(250)), 10000] | min }}" }
+
+automation:
+  - id: food_reset_midnight
+    alias: "Food · reset manual counters at midnight"
+    triggers:
+      - trigger: time
+        at: "00:00:00"
+    actions:
+      - action: input_number.set_value
+        target:
+          entity_id:
+            - input_number.food_calories
+            - input_number.food_protein
+            - input_number.food_carbs
+            - input_number.food_fat
+            - input_number.food_water_ml
+        data: { value: 0 }
+      - action: input_text.set_value
+        target: { entity_id: input_text.last_food_entry }
+        data: { value: "" }
+  - id: food_log_webhook
+    alias: "Food · webhook quick add"
+    mode: queued
+    triggers:
+      - trigger: webhook
+        webhook_id: !secret food_webhook_id
+        allowed_methods: [POST]
+        local_only: true
+    actions:
+      - action: script.food_add
+        data:
+          calories: "{{ trigger.json.calories | default(0) }}"
+          protein: "{{ trigger.json.protein | default(0) }}"
+          carbs: "{{ trigger.json.carbs | default(0) }}"
+          fat: "{{ trigger.json.fat | default(0) }}"
+          name: "{{ trigger.json.name | default('Food') }}"
+
+recorder:
+  exclude:
+    entities:
+      - input_text.last_food_entry

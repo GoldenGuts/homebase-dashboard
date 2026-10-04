@@ -1,0 +1,595 @@
+# Fitness view. Garmin Connect (HACS) sensors, the activity map (packages/activities.yaml +
+# bin/garmin_activities.py + www/garmin/map.html) and the nutrition package. Included from home.yaml.
+#
+# LAYOUT: same "flexi" pattern as the Home view - three columns (left 1.3fr, mid 1fr, right 1fr),
+# each a nested grid that packs its cards top-to-bottom (no dead space). Below 1100px the right
+# column drops under the left one; below 800px everything stacks.
+#   left  = activity map (hero), activities feed
+#   mid   = body battery knob, sleep, stress, heart
+#   right = steps knob + 7-day chart, food, body
+# HEADER PATTERN: bold 14px title left, one muted 12px meta right - on every card.
+title: Fitness
+path: fitness
+icon: mdi:heart-pulse
+type: custom:grid-layout
+layout:
+  grid-template-columns: minmax(0,1.3fr) minmax(0,1fr) minmax(0,1fr)
+  grid-template-areas: |
+    "left mid right"
+    "now now now"
+  grid-gap: 18px
+  padding: 18px 18px 96px
+  align-items: start
+  mediaquery:
+    "(max-width: 800px)":
+      grid-template-columns: minmax(0,1fr)
+      grid-template-areas: |
+        "left" "mid" "right" "now"
+      grid-gap: 12px
+      padding: 12px 12px 96px
+    "(max-width: 1100px)":
+      grid-template-columns: minmax(0,1fr) minmax(0,1fr)
+      grid-template-areas: |
+        "left mid"
+        "right mid"
+      grid-gap: 14px
+      padding: 14px 14px 96px
+cards:
+
+  # ######################################################################
+  # LEFT COLUMN: activity map, activities feed
+  # ######################################################################
+  - type: custom:layout-card
+    view_layout: { grid-area: left, align-self: start }
+    layout_type: custom:grid-layout
+    layout: &col
+      grid-template-columns: minmax(0,1fr)
+      grid-auto-rows: max-content
+      align-items: start
+      grid-gap: 18px
+      margin: 0
+      padding: 0
+      mediaquery:
+        "(max-width: 800px)": { grid-gap: 12px }
+        "(max-width: 1100px)": { grid-gap: 14px }
+    cards:
+
+      # ================= ACTIVITY MAP (hero) =================
+      # Leaflet page in an iframe (same origin, /local/garmin/map.html). It reads the parent's
+      # dark mode itself, so no theme param here - passing one would freeze it on the first value.
+      # `v=` is the last sync time: HA serves /local with long cache headers, so the page (and its
+      # activities.json) only reloads when new data arrived.
+      - type: custom:button-card
+        template: glass
+        entity: sensor.garmin_activities
+        show_icon: false
+        show_name: false
+        show_state: false
+        tap_action: { action: none }
+        styles:
+          # button-card adds ha-card.disabled { pointer-events: none } when every action is `none`;
+          # re-enable so the iframe (and the feed rows below) still get clicks.
+          card: [ padding: 0, overflow: hidden, pointer-events: auto ]
+          grid: [ grid-template-areas: '"h" "m"', grid-template-columns: "minmax(0,1fr)" ]
+          custom_fields:
+            h: [ width: 100%, text-align: left, padding: 16px 20px 12px, box-sizing: border-box ]
+            m: [ width: 100% ]
+        custom_fields:
+          h: >
+            [[[
+              var f = entity ? entity.attributes : {};
+              var all = f.all || {}; var meta = entity && f.tracks !== undefined
+                ? f.tracks + ' tracks · ' + (f.places || 0) + ' place' + (f.places === 1 ? '' : 's') + ' · ' + Math.round(all.km || 0) + ' km logged'
+                : 'syncing with Garmin…';
+              return '<div class="row between"><b style="font-size:14px">Activity map</b><span class="muted">' + meta + '</span></div>';
+            ]]]
+          m: >
+            [[[ return '<iframe class="gmap" src="/local/garmin/map.html?lat=' + hass.config.latitude + '&lon=' + hass.config.longitude + '&v=' + encodeURIComponent(entity && entity.attributes.updated || '0') + '" loading="lazy" title="Activity map"></iframe>'; ]]]
+        extra_styles: |
+          .tag { font-size:10px; text-transform:uppercase; letter-spacing:1px; color:var(--nc-muted); font-weight:700; }
+          .mid { font-size:22px; font-weight:700; letter-spacing:-.5px; line-height:1.15; }
+          .muted { color:var(--nc-muted); font-size:12px; }
+          .row { display:flex; align-items:center; gap:12px; }
+          .row.between > .muted { min-width:0; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+          .between { justify-content:space-between; }
+          .grow { flex:1; min-width:0; }
+          ha-icon { margin:0; }
+          .gmap { display:block; width:100%; height:460px; border:0; background:var(--nc-surface-2); }
+          @media (max-width: 800px) { .gmap { height: 380px; } }
+
+      # ================= ACTIVITIES: this week tiles, 12-week bars, recent sessions =================
+      # Rows: tap a session with a GPS track -> the map flies to it (postMessage to the iframe);
+      # sessions without a track open in Garmin Connect.
+      - type: custom:button-card
+        template: glass
+        entity: sensor.garmin_activities
+        show_icon: false
+        show_name: false
+        show_state: false
+        tap_action: { action: none }
+        styles:
+          card: [ pointer-events: auto ]
+          grid: [ grid-template-areas: '"b"', grid-template-columns: "minmax(0,1fr)" ]
+          custom_fields: { b: [ width: 100%, text-align: left ] }
+        custom_fields:
+          b: >
+            [[[
+              var f = entity ? entity.attributes : {};
+              var ICON = { running:'mdi:run', track_running:'mdi:run', treadmill_running:'mdi:run', trail_running:'mdi:run-fast', walking:'mdi:walk', hiking:'mdi:hiking', stair_climbing:'mdi:stairs',
+                cycling:'mdi:bike', road_biking:'mdi:bike', indoor_cycling:'mdi:bike', mountain_biking:'mdi:bike', swimming:'mdi:swim', lap_swimming:'mdi:swim',
+                badminton:'mdi:badminton', pickleball:'mdi:tennis', tennis:'mdi:tennis', table_tennis:'mdi:table-tennis', cricket:'mdi:cricket', basketball:'mdi:basketball', soccer:'mdi:soccer',
+                strength_training:'mdi:dumbbell', indoor_cardio:'mdi:heart-pulse', cardio:'mdi:heart-pulse', hiit:'mdi:lightning-bolt', elliptical:'mdi:run-fast', yoga:'mdi:yoga' };
+              var COL = { running:'#b5e21c', track_running:'#b5e21c', treadmill_running:'#b5e21c', trail_running:'#b5e21c', walking:'#ff9f2e', hiking:'#ff9f2e', stair_climbing:'#ff9f2e',
+                cycling:'#3fe3ff', road_biking:'#3fe3ff', indoor_cycling:'#3fe3ff', mountain_biking:'#3fe3ff', swimming:'#3fe3ff', lap_swimming:'#3fe3ff',
+                badminton:'#ff4fa3', pickleball:'#ff4fa3', tennis:'#ff4fa3', table_tennis:'#ff4fa3', cricket:'#ff4fa3', basketball:'#ff4fa3', soccer:'#ff4fa3' };
+              var LABEL = { running:'Run', track_running:'Track run', treadmill_running:'Treadmill', trail_running:'Trail run', walking:'Walk', hiking:'Hike', stair_climbing:'Stairs', cycling:'Ride', road_biking:'Ride', indoor_cycling:'Indoor ride', swimming:'Swim', lap_swimming:'Swim', badminton:'Badminton', pickleball:'Pickleball', tennis:'Tennis', table_tennis:'Table tennis', cricket:'Cricket', strength_training:'Strength', indoor_cardio:'Cardio', cardio:'Cardio', hiit:'HIIT', elliptical:'Elliptical', yoga:'Yoga' };
+              var lab = (t) => LABEL[t] || (t || 'other').replace(/_/g, ' ').replace(/^\w/, c => c.toUpperCase());
+              var col = (t) => COL[t] || '#7b61ff';
+              var hm = (min) => { min = Math.round(min || 0); var h = Math.floor(min / 60); return h ? h + 'h ' + String(min % 60).padStart(2, '0') + 'm' : min + 'm'; };
+              var dur = (s) => hm((s || 0) / 60);
+              var km = (m) => m >= 1000 ? (m / 1000).toFixed(m >= 10000 ? 1 : 2) + ' km' : Math.round(m) + ' m';
+              var distSport = (t) => /run|walk|hik|cycl|bik|swim|row|ski/.test(t || '');
+              var pace = (a) => { if (!distSport(a.type) || !a.speed || a.speed < 0.3 || !(a.dist > 400)) return ''; if (/cycl|bik/.test(a.type)) return (a.speed * 3.6).toFixed(1) + ' km/h'; var p = 1000 / a.speed / 60; return Math.floor(p) + ':' + String(Math.round((p % 1) * 60)).padStart(2, '0') + ' /km'; };
+              var when = (s) => { var d = new Date(s); if (isNaN(d)) return ''; var now = new Date(); var day = d.toDateString() === now.toDateString() ? 'Today' : d.toDateString() === new Date(now - 864e5).toDateString() ? 'Yesterday' : d.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' }); return day + ' · ' + d.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' }); };
+              var esc = (s) => String(s || '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+              if (!entity || !f.week) return '<div class="row between" style="margin-bottom:10px"><b style="font-size:14px">Activities</b><span class="muted">syncing…</span></div><div class="muted" style="line-height:1.4">First Garmin sync runs within a few minutes of a restart. Every session and GPS track lands here.</div>';
+              var w = f.week || {}, lw = f.last_week || {}, m = f.month || {};
+              var tile = (c, val, lab2) => '<div class="st" style="--c:' + c + '"><div class="mid">' + val + '</div><div class="muted">' + lab2 + '</div></div>';
+              var vs = (a, b, u) => b ? '<span style="color:' + (a >= b ? '#8fc31f' : '#ff6b6b') + ';font-weight:700">' + (a >= b ? '▲' : '▼') + '</span> last wk ' + b + u : 'last wk 0' + u;
+              var tiles = '<div class="stat4">' + tile('#ff4fa3', (w.n || 0) + ' <span class="muted" style="font-size:12px;font-weight:500">' + vs(w.n || 0, lw.n || 0, '') + '</span>', 'Sessions this week')
+                + tile('#3fe3ff', hm(w.min) + ' <span class="muted" style="font-size:12px;font-weight:500">' + vs(w.min || 0, lw.min || 0, 'm').replace(/last wk (\d+)m/, (x, n) => 'last wk ' + hm(n)) + '</span>', 'Active time')
+                + tile('#b5e21c', (w.km || 0).toFixed(1) + ' km', 'Distance') + tile('#ff9f2e', Math.round(w.kcal || 0).toLocaleString('en-IN') + ' kcal', 'Burned') + '</div>';
+              var weeks = f.weeks || []; var mx = Math.max.apply(null, weeks.map(x => x[1]).concat([1]));
+              var bars = weeks.map((x, i) => { var h = Math.max(4, Math.round(84 * x[1] / mx)); var last = i === weeks.length - 1; var tip = (x[1] === mx && mx > 0) || last ? '<span class="tip">' + hm(x[1]) + '</span>' : '';
+                return '<div class="c' + (last ? ' now' : '') + '" title="' + x[0] + ' · ' + x[3] + ' sessions · ' + hm(x[1]) + '">' + tip + '<i style="height:' + h + 'px"></i></div>'; }).join('');
+              var lbl = weeks.map((x, i) => { var mon = x[0].split(' ')[1]; var prev = i ? weeks[i - 1][0].split(' ')[1] : ''; var last = i === weeks.length - 1; return '<div>' + (last ? 'now' : (mon !== prev ? mon : '')) + '</div>'; }).join('');
+              var rows = (f.last || []).map(a => { var c = col(a.type); var byDist = distSport(a.type) && a.dist > 400; var main = byDist ? km(a.dist) : dur(a.dur); var sub = byDist ? dur(a.dur) + (pace(a) ? ' · ' + pace(a) : '') : (a.hr ? Math.round(a.hr) + ' bpm' : (a.cal ? Math.round(a.cal) + ' kcal' : ''));
+                var act = a.poly ? "window.postMessage({garminFocus:'" + a.id + "'},location.origin);try{var m=this.getRootNode().host.parentElement.firstElementChild;if(m.getBoundingClientRect().top<0)m.scrollIntoView({behavior:'smooth',block:'start'});}catch(e){}" : "window.open('https://connect.garmin.com/modern/activity/" + a.id + "','_blank');";
+                return '<div class="arow" onclick="' + act + '"><span class="ico" style="background:color-mix(in srgb,' + c + ' 18%, var(--nc-surface-2));color:' + c + '"><ha-icon icon="' + (ICON[a.type] || 'mdi:lightning-bolt') + '" style="--mdc-icon-size:18px"></ha-icon></span>'
+                  + '<div class="grow"><div style="font-weight:600">' + esc(a.name || lab(a.type)) + (a.poly ? ' <span class="gps">GPS</span>' : '') + '</div><div class="muted">' + when(a.start) + (a.loc ? ' · ' + esc(a.loc) : '') + '</div></div>'
+                  + '<div class="v"><b>' + main + '</b><div class="muted">' + sub + '</div></div></div>'; }).join('');
+              var types = f.types || {}; var tk = Object.keys(types).slice(0, 5);
+              var chips = tk.map(t => '<span class="pill" style="gap:5px"><span class="dot" style="background:' + col(t) + ';box-shadow:0 0 8px ' + col(t) + '"></span>' + lab(t) + ' <span class="muted" style="font-size:11px">' + types[t] + '</span></span>').join('');
+              return '<div class="row between" style="margin-bottom:12px"><b style="font-size:14px">Activities</b><span class="muted">' + (m.n || 0) + ' this month · ' + hm(m.min) + ' · ' + (f.streak_weeks || 0) + ' wk streak</span></div>'
+                + tiles
+                + '<div class="tag" style="margin:16px 0 4px">Active minutes · 12 weeks</div><div class="wk">' + bars + '</div><div class="wkl">' + lbl + '</div>'
+                + (chips ? '<div class="pills" style="margin:10px 0 2px">' + chips + '</div>' : '')
+                + '<div class="tag" style="margin:14px 0 4px">Recent</div>' + rows
+                + '<div class="muted" style="margin-top:8px;font-size:11px">' + (f.year ? f.year.n + ' sessions · ' + Math.round(f.year.km) + ' km · ' + hm(f.year.min) + ' this year' : '') + (f.pending ? ' · ' + f.pending + ' tracks still syncing' : '') + '</div>';
+            ]]]
+        extra_styles: |
+          .tag { font-size:10px; text-transform:uppercase; letter-spacing:1px; color:var(--nc-muted); font-weight:700; }
+          .mid { font-size:22px; font-weight:700; letter-spacing:-.5px; line-height:1.15; }
+          .muted { color:var(--nc-muted); font-size:12px; }
+          .row { display:flex; align-items:center; gap:12px; }
+          .row.between > .muted { min-width:0; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+          .between { justify-content:space-between; }
+          .grow { flex:1; min-width:0; }
+          .pill { display:inline-flex; align-items:center; gap:6px; padding:5px 10px; border-radius:999px; font-size:11px; font-weight:700; background:var(--nc-surface-2); color:var(--primary-text-color); }
+          .pills { display:flex; flex-wrap:wrap; gap:6px; }
+          .dot { width:9px; height:9px; border-radius:50%; display:inline-block; flex:none; }
+          .stat4 { display:grid; grid-template-columns:1fr 1fr; gap:12px 14px; }
+          .stat4 .st { border-left:3px solid var(--c); padding-left:10px; min-width:0; }
+          .stat4 .mid { font-size:20px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+          ha-icon { margin:0; }
+          .wk { display:grid; grid-template-columns:repeat(12,1fr); align-items:end; gap:5px; height:104px; padding:20px 2px 0; border-bottom:1px dashed var(--nc-track); box-sizing:border-box; }
+          .wk .c { display:flex; flex-direction:column; align-items:center; justify-content:flex-end; height:100%; position:relative; }
+          .wk .c i { display:block; width:100%; max-width:22px; border-radius:7px 7px 3px 3px; background:linear-gradient(180deg,#4fd7ff,#1fa8ff); box-shadow:0 6px 14px rgba(0,0,0,.25); }
+          .wk .c.now i { background:linear-gradient(180deg,#ff5c8a,#ff2d6f); }
+          .wk .c .tip { position:absolute; top:-18px; font-size:10px; font-weight:700; color:var(--nc-muted); white-space:nowrap; }
+          .wkl { display:grid; grid-template-columns:repeat(12,1fr); gap:5px; padding:6px 2px 0; font-size:9px; font-weight:600; color:var(--nc-muted); text-align:center; }
+          .arow { display:flex; align-items:center; gap:10px; padding:7px 0; min-width:0; cursor:pointer; border-top:1px solid var(--nc-track); font-size:13px; }
+          .arow:first-of-type { border-top:none; }
+          .arow:hover { background:color-mix(in srgb, var(--nc-surface-2) 60%, transparent); margin:0 -8px; padding-left:8px; padding-right:8px; border-radius:12px; }
+          .arow .ico { width:34px; height:34px; border-radius:12px; display:grid; place-items:center; flex:none; }
+          .arow .grow > div { white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+          .arow .v { text-align:right; flex:none; }
+          .arow .v b { font-size:13px; font-variant-numeric:tabular-nums; }
+          .arow .v .muted { font-size:11px; }
+          .gps { font-size:9px; font-weight:800; letter-spacing:.6px; color:#3fe3ff; background:color-mix(in srgb,#3fe3ff 16%, transparent); border-radius:6px; padding:1px 5px; vertical-align:1px; }
+
+  # ######################################################################
+  # MIDDLE COLUMN: body battery, sleep, stress, heart
+  # ######################################################################
+  - type: custom:layout-card
+    view_layout: { grid-area: mid, align-self: start }
+    layout_type: custom:grid-layout
+    layout: *col
+    cards:
+
+      # ================= BODY BATTERY (knob, like Screen time on Home) =================
+      - type: custom:button-card
+        template: knob
+        entity: sensor.garmin_connect_body_battery
+        triggers_update: [sensor.garmin_connect_training_readiness, sensor.garmin_connect_recovery_time, sensor.garmin_connect_hrv_last_night_average, sensor.garmin_connect_training_status, sensor.garmin_connect_last_synced]
+        tap_action: { action: more-info }
+        variables:
+          title: Body battery
+          pct: "[[[ return entity && !isNaN(Number(entity.state)) ? Math.round(Number(entity.state)) : 0; ]]]"
+          value: "[[[ return entity && !isNaN(Number(entity.state)) ? Math.round(Number(entity.state)) : '—'; ]]]"
+          sub: >
+            [[[ var n = (id) => { var e = states[id]; return e && !isNaN(Number(e.state)) ? Math.round(Number(e.state)) : null; };
+                var c = n('sensor.garmin_connect_body_battery_charged'), d = n('sensor.garmin_connect_body_battery_drained'), hi = n('sensor.garmin_connect_body_battery_highest');
+                return (c !== null ? '+' + c + ' / −' + d + ' today' : 'today') + (hi !== null ? ' · peak ' + hi : ''); ]]]
+          stat_a_value: "[[[ var r = states['sensor.garmin_connect_training_readiness']; return r && !isNaN(Number(r.state)) ? Math.round(Number(r.state)) : '—'; ]]]"
+          stat_a_label: Readiness
+          stat_b_value: "[[[ var r = states['sensor.garmin_connect_recovery_time']; if (!r || isNaN(Number(r.state))) return '—'; var h = Number(r.state); return h < 1 ? Math.round(h * 60) + 'm' : Math.floor(h) + 'h ' + String(Math.round((h % 1) * 60)).padStart(2, '0') + 'm'; ]]]"
+          stat_b_label: Recovery
+          rows: >
+            [[[
+              var st = (id) => { var e = states[id]; return e && !['unknown', 'unavailable', 'None', ''].includes(e.state) ? e.state : null; };
+              var num = (id, dp) => { var v = st(id); return v !== null && !isNaN(Number(v)) ? Number(v).toFixed(dp) : null; };
+              var row = (ico, k, v, colr) => '<div class="urow"><ha-icon icon="' + ico + '" style="color:' + colr + ';--mdc-icon-size:16px"></ha-icon><span class="grow">' + k + '</span><b>' + (v === null ? '<span class="muted">—</span>' : v) + '</b></div>';
+              var hrv = num('sensor.garmin_connect_hrv_last_night_average', 0), hs = st('sensor.garmin_connect_hrv_status');
+              var fa = num('sensor.garmin_connect_fitness_age', 1), ca = num('sensor.garmin_connect_chronological_age', 0);
+              var ts = st('sensor.garmin_connect_training_status'); ts = ts && ts.toLowerCase() !== 'no status' ? ts : null;
+              var sync = st('sensor.garmin_connect_last_synced'); var d = sync ? new Date(sync) : null;
+              return '<div style="margin-top:12px">'
+                + row('mdi:heart-flash', 'HRV last night', hrv !== null ? hrv + ' ms' + (hs && hs.toLowerCase() !== 'none' ? ' <span class="muted">· ' + hs.toLowerCase() + '</span>' : '') : null, '#ff4fa3')
+                + row('mdi:cake-variant', 'Fitness age', fa !== null ? fa + (ca ? ' <span class="muted">· body ' + ca + '</span>' : '') : null, '#ff9f2e')
+                + row('mdi:run-fast', 'VO₂ max', num('sensor.garmin_connect_vo2_max', 0), '#b5e21c')
+                + row('mdi:chart-timeline-variant', 'Training status', ts, '#7b61ff')
+                + row('mdi:sync', 'Watch synced', d && !isNaN(d) ? d.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' }) : null, 'var(--nc-muted)')
+                + '</div>';
+            ]]]
+
+      # ================= SLEEP =================
+      - type: custom:button-card
+        template: glass
+        entity: sensor.garmin_connect_sleep_score
+        triggers_update: [sensor.garmin_connect_sleep_duration, sensor.garmin_connect_deep_sleep, sensor.garmin_connect_light_sleep, sensor.garmin_connect_rem_sleep, sensor.garmin_connect_awake_time]
+        show_icon: false
+        show_name: false
+        show_state: false
+        tap_action: { action: more-info }
+        styles:
+          grid: [ grid-template-areas: '"b"', grid-template-columns: "minmax(0,1fr)" ]
+          custom_fields: { b: [ width: 100%, text-align: left ] }
+        custom_fields:
+          b: >
+            [[[
+              var v = (id) => { var e = states[id]; return e && !isNaN(Number(e.state)) ? Number(e.state) : 0; };
+              var st = (id) => { var e = states[id]; return e && !['unknown', 'unavailable'].includes(e.state) ? e.state : null; };
+              var h = (m) => (m / 60).toFixed(1) + 'h';
+              var tm = (id) => { var s = st(id); if (!s) return '—'; var d = new Date(s); return isNaN(d) ? '—' : d.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' }); };
+              var deep = v('sensor.garmin_connect_deep_sleep'), light = v('sensor.garmin_connect_light_sleep'), rem = v('sensor.garmin_connect_rem_sleep'), awake = v('sensor.garmin_connect_awake_time');
+              var tot = deep + light + rem + awake || 1;
+              var seg = (m, c) => '<div style="width:' + (100 * m / tot) + '%;background:' + c + '"></div>';
+              var score = entity && !isNaN(Number(entity.state)) ? Math.round(Number(entity.state)) : '—';
+              var need = v('sensor.garmin_connect_sleep_need'), slept = v('sensor.garmin_connect_sleep_duration');
+              var q = score === '—' ? '' : score >= 90 ? 'Excellent' : score >= 80 ? 'Good' : score >= 60 ? 'Fair' : 'Poor';
+              var sc = score === '—' ? 'var(--nc-muted)' : score >= 80 ? '#b5e21c' : score >= 60 ? '#ff9f2e' : '#ff4fa3';
+              return '<div class="row between" style="margin-bottom:10px"><b style="font-size:14px">Sleep</b><span class="muted">bed ' + tm('sensor.garmin_connect_bedtime') + ' → up ' + tm('sensor.garmin_connect_wake_time') + '</span></div>'
+                + '<div style="display:flex;align-items:baseline;gap:10px"><div style="font-size:40px;font-weight:700;letter-spacing:-1.5px;color:' + sc + '">' + score + '</div><div><div style="font-size:13px;font-weight:600">' + q + '</div><div class="muted">' + h(slept) + ' slept · need ' + h(need) + (slept && need ? ' · ' + Math.round(100 * slept / need) + '%' : '') + '</div></div></div>'
+                + '<div style="display:flex;height:10px;border-radius:999px;overflow:hidden;margin:12px 0 6px;background:var(--nc-track)">' + seg(deep, '#7b61ff') + seg(light, '#3fe3ff') + seg(rem, '#ff4fa3') + seg(awake, '#ff9f2e') + '</div>'
+                + '<div style="display:flex;gap:12px;font-size:11px;color:var(--nc-muted);flex-wrap:wrap"><span><b style="color:#7b61ff">■</b> deep ' + h(deep) + '</span><span><b style="color:#3fe3ff">■</b> light ' + h(light) + '</span><span><b style="color:#ff4fa3">■</b> REM ' + h(rem) + '</span><span><b style="color:#ff9f2e">■</b> awake ' + h(awake) + '</span></div>'
+                + '<div class="muted" style="margin-top:10px">Resting HR ' + (st('sensor.garmin_connect_resting_heart_rate') || '—') + ' bpm · SpO₂ ' + (st('sensor.garmin_connect_average_spo2') ? Math.round(v('sensor.garmin_connect_average_spo2')) + '%' : '—') + ' · ' + (st('sensor.garmin_connect_average_sleep_respiration') ? Math.round(v('sensor.garmin_connect_average_sleep_respiration')) + ' breaths/min' : '') + '</div>';
+            ]]]
+
+      # ================= STRESS =================
+      - type: custom:button-card
+        template: glass
+        entity: sensor.garmin_connect_average_stress_level
+        triggers_update: [sensor.garmin_connect_rest_stress_duration, sensor.garmin_connect_low_stress_duration, sensor.garmin_connect_medium_stress_duration, sensor.garmin_connect_high_stress_duration, sensor.garmin_connect_max_stress_level]
+        show_icon: false
+        show_name: false
+        show_state: false
+        tap_action: { action: more-info }
+        styles:
+          grid: [ grid-template-areas: '"b"', grid-template-columns: "minmax(0,1fr)" ]
+          custom_fields: { b: [ width: 100%, text-align: left ] }
+        custom_fields:
+          b: >
+            [[[
+              var v = (id) => { var e = states[id]; return e && !isNaN(Number(e.state)) ? Number(e.state) : 0; };
+              var rest = v('sensor.garmin_connect_rest_stress_duration'), low = v('sensor.garmin_connect_low_stress_duration'), med = v('sensor.garmin_connect_medium_stress_duration'), high = v('sensor.garmin_connect_high_stress_duration');
+              var tot = rest + low + med + high || 1;
+              var seg = (m, c) => '<div style="width:' + (100 * m / tot) + '%;background:' + c + '"></div>';
+              var avg = entity && !isNaN(Number(entity.state)) ? Math.round(Number(entity.state)) : '—';
+              var q = states['sensor.garmin_connect_stress_qualifier']; var mx = v('sensor.garmin_connect_max_stress_level');
+              var c = avg === '—' ? 'var(--nc-muted)' : avg < 26 ? '#3fe3ff' : avg < 51 ? '#b5e21c' : avg < 76 ? '#ff9f2e' : '#ff4fa3';
+              var hm = (m) => m >= 60 ? Math.floor(m / 60) + 'h' + (Math.round(m % 60) ? ' ' + Math.round(m % 60) + 'm' : '') : Math.round(m) + 'm';
+              return '<div class="row between" style="margin-bottom:10px"><b style="font-size:14px">Stress</b><span class="muted">avg today' + (mx ? ' · peak ' + mx : '') + '</span></div>'
+                + '<div style="display:flex;align-items:baseline;gap:10px"><div style="font-size:40px;font-weight:700;letter-spacing:-1.5px;color:' + c + '">' + avg + '</div><div><div style="font-size:13px;font-weight:600">' + (q && q.state !== 'unknown' ? q.state : '—') + '</div><div class="muted">' + hm(rest) + ' resting · ' + hm(low + med + high) + ' stressed</div></div></div>'
+                + '<div style="display:flex;height:10px;border-radius:999px;overflow:hidden;margin:12px 0 6px;background:var(--nc-track)">' + seg(rest, '#3fe3ff') + seg(low, '#b5e21c') + seg(med, '#ff9f2e') + seg(high, '#ff4fa3') + '</div>'
+                + '<div style="display:flex;gap:10px;font-size:11px;color:var(--nc-muted);flex-wrap:wrap"><span><b style="color:#3fe3ff">■</b> rest ' + hm(rest) + '</span><span><b style="color:#b5e21c">■</b> low ' + hm(low) + '</span><span><b style="color:#ff9f2e">■</b> medium ' + hm(med) + '</span><span><b style="color:#ff4fa3">■</b> high ' + hm(high) + '</span></div>';
+            ]]]
+
+      # ================= HEART: resting HR + HRV, 30 days =================
+      - type: custom:button-card
+        template: glass
+        entity: sensor.garmin_connect_resting_heart_rate
+        triggers_update: [sensor.garmin_connect_hrv_last_night_average, sensor.garmin_connect_7_day_average_resting_heart_rate, sensor.garmin_connect_max_heart_rate]
+        show_icon: false
+        show_name: false
+        show_state: false
+        tap_action: { action: more-info }
+        styles:
+          grid: [ grid-template-areas: '"h" "s" "c"', grid-template-columns: "minmax(0,1fr)" ]
+          custom_fields:
+            h: [ width: 100%, text-align: left ]
+            s: [ width: 100%, text-align: left ]
+            c: [ width: calc(100% + 16px), margin: 6px -8px 0 ]
+        custom_fields:
+          h: >
+            [[[ var a = states['sensor.garmin_connect_7_day_average_resting_heart_rate']; return '<div class="row between" style="margin-bottom:10px"><b style="font-size:14px">Heart</b><span class="muted">30 days' + (a && !isNaN(Number(a.state)) ? ' · 7-day avg ' + Math.round(Number(a.state)) + ' bpm' : '') + '</span></div>'; ]]]
+          s: >
+            [[[
+              var n = (id) => { var e = states[id]; return e && !isNaN(Number(e.state)) ? Math.round(Number(e.state)) : '—'; };
+              var tile = (c, val, lab) => '<div class="st" style="--c:' + c + '"><div class="mid">' + val + '</div><div class="muted">' + lab + '</div></div>';
+              return '<div class="stat4">' + tile('#ff4fa3', n('sensor.garmin_connect_resting_heart_rate') + ' <span class="muted" style="font-size:12px;font-weight:500">bpm</span>', 'Resting') + tile('#7b61ff', n('sensor.garmin_connect_hrv_last_night_average') + ' <span class="muted" style="font-size:12px;font-weight:500">ms</span>', 'HRV last night')
+                + tile('#ff9f2e', n('sensor.garmin_connect_max_heart_rate') + ' <span class="muted" style="font-size:12px;font-weight:500">bpm</span>', 'Max today') + tile('#3fe3ff', n('sensor.garmin_connect_lactate_threshold_heart_rate') + ' <span class="muted" style="font-size:12px;font-weight:500">bpm</span>', 'Lactate threshold') + '</div>';
+            ]]]
+          c:
+            card:
+              type: custom:apexcharts-card
+              header: { show: false }
+              card_mod:
+                style: |
+                  ha-card { background: none; border: none; box-shadow: none; }
+              graph_span: 30d
+              apex_config:
+                chart: { height: 160, toolbar: { show: false }, parentHeightOffset: 0 }
+                grid: { borderColor: "var(--nc-track)", strokeDashArray: 3, padding: { left: 0, right: 0 } }
+                stroke: { curve: smooth, width: 3 }
+                dataLabels: { enabled: false }
+                xaxis: { labels: { style: { colors: "var(--nc-muted)", fontSize: "10px" } }, axisBorder: { show: false }, axisTicks: { show: false } }
+                yaxis: { labels: { style: { colors: "var(--nc-dim)", fontSize: "10px" } } }
+                legend: { show: false }
+                tooltip: { theme: dark }
+              series:
+                - entity: sensor.garmin_connect_resting_heart_rate
+                  name: Resting HR
+                  color: "#ff4fa3"
+                  group_by: { func: min, duration: 1d }
+                  yaxis_id: main
+                - entity: sensor.garmin_connect_hrv_last_night_average
+                  name: HRV
+                  color: "#7b61ff"
+                  group_by: { func: last, duration: 1d }
+                  yaxis_id: hrv
+              yaxis:
+                - id: main
+                  min: ~40
+                - id: hrv
+                  opposite: true
+                  show: false
+
+  # ######################################################################
+  # RIGHT COLUMN: steps knob + 7-day chart, food, body
+  # ######################################################################
+  - type: custom:layout-card
+    view_layout: { grid-area: right, align-self: start }
+    layout_type: custom:grid-layout
+    layout: *col
+    cards:
+
+      # ================= STEPS (knob) + 7-day chart =================
+      - type: custom:button-card
+        template: knob
+        entity: sensor.garmin_connect_steps
+        triggers_update: [sensor.garmin_connect_daily_step_goal, sensor.garmin_connect_distance, sensor.garmin_connect_floors_ascended, sensor.garmin_connect_intensity_minutes, sensor.garmin_connect_yesterday_steps]
+        tap_action: { action: more-info }
+        variables:
+          title: Steps
+          pct: "[[[ var g = states['sensor.garmin_connect_daily_step_goal']; var goal = g && Number(g.state) > 0 ? Number(g.state) : 8000; return Math.min(100, Math.round(100 * Number(entity && entity.state || 0) / goal)); ]]]"
+          value: "[[[ return entity && !isNaN(Number(entity.state)) ? Number(entity.state).toLocaleString('en-IN') : '—'; ]]]"
+          sub: "[[[ var g = states['sensor.garmin_connect_daily_step_goal']; var goal = g && Number(g.state) > 0 ? Number(g.state) : 8000; var p = Math.round(100 * Number(entity && entity.state || 0) / goal); return 'goal ' + goal.toLocaleString('en-IN') + ' · ' + p + '%'; ]]]"
+          stat_a_value: "[[[ var d = states['sensor.garmin_connect_distance']; return d && !isNaN(Number(d.state)) ? (Number(d.state) / 1000).toFixed(1) + ' km' : '—'; ]]]"
+          stat_a_label: Distance
+          stat_b_value: "[[[ var f = states['sensor.garmin_connect_floors_ascended']; return f && !isNaN(Number(f.state)) ? Math.round(Number(f.state)) : '—'; ]]]"
+          stat_b_label: Floors climbed
+          rows: >
+            [[[
+              var n = (id) => { var e = states[id]; return e && !isNaN(Number(e.state)) ? Number(e.state) : 0; };
+              var im = n('sensor.garmin_connect_intensity_minutes'), ig = n('sensor.garmin_connect_intensity_minutes_goal') || 150;
+              var p = Math.min(100, Math.round(100 * im / ig));
+              var y = n('sensor.garmin_connect_yesterday_steps'), wa = n('sensor.garmin_connect_weekly_step_average');
+              return '<div style="margin-top:12px">'
+                + '<div class="urow"><span class="dot" style="background:#ff9f2e"></span><span class="grow">Intensity <span class="muted">min/wk</span></span><span class="bar"><i style="width:' + p + '%;background:linear-gradient(90deg,#ffb84d,#ff8a1e)"></i></span><b>' + Math.round(im) + '<span class="muted"> / ' + ig + '</span></b></div>'
+                + '<div class="urow"><span class="dot" style="background:#b5e21c"></span><span class="grow">Yesterday</span><b>' + y.toLocaleString('en-IN') + '</b></div>'
+                + '<div class="urow"><span class="dot" style="background:#3fe3ff"></span><span class="grow">7-day average</span><b>' + wa.toLocaleString('en-IN') + '</b></div>'
+                + '</div>';
+            ]]]
+        styles:
+          grid: [ grid-template-areas: '"h" "k" "s" "r" "c"' ]
+          custom_fields:
+            c: [ width: calc(100% + 16px), margin: 4px -8px 0 ]
+        custom_fields:
+          c:
+            card:
+              type: conditional
+              conditions:
+                - condition: numeric_state
+                  entity: sensor.garmin_connect_steps
+                  above: -1
+              card:
+                type: custom:apexcharts-card
+                header: { show: false }
+                card_mod:
+                  style: |
+                    ha-card { background: none; border: none; box-shadow: none; }
+                graph_span: 7d
+                span: { end: day }
+                apex_config:
+                  chart: { height: 130, toolbar: { show: false }, parentHeightOffset: 0 }
+                  grid: { borderColor: "var(--nc-track)", strokeDashArray: 3, padding: { left: 0, right: 0 } }
+                  plotOptions: { bar: { borderRadius: 5, columnWidth: "42%" } }
+                  dataLabels: { enabled: false }
+                  xaxis: { labels: { style: { colors: "var(--nc-muted)", fontSize: "10px" }, format: dd }, axisBorder: { show: false }, axisTicks: { show: false } }
+                  yaxis: { labels: { style: { colors: "var(--nc-dim)", fontSize: "10px" }, formatter: "EVAL:v => Math.round(v/1000) + 'k'" }, tickAmount: 2 }
+                  legend: { show: false }
+                  tooltip: { theme: dark }
+                series:
+                  - entity: sensor.garmin_connect_steps
+                    name: Steps
+                    type: column
+                    color: "#b5e21c"
+                    group_by: { func: max, duration: 1d }
+                  - entity: sensor.garmin_connect_daily_step_goal
+                    name: Goal
+                    type: line
+                    color: "#ff9f2e"
+                    stroke_width: 2
+                    group_by: { func: last, duration: 1d }
+
+      # ================= FOOD =================
+      - type: custom:button-card
+        template: glass
+        entity: sensor.nutrition_calories
+        triggers_update: [sensor.nutrition_protein, sensor.nutrition_carbs, sensor.nutrition_fat, sensor.water_today, input_text.last_food_entry, sensor.calorie_balance]
+        show_icon: false
+        show_name: false
+        show_state: false
+        tap_action: { action: none }
+        styles:
+          grid: [ grid-template-areas: '"b" "pills" "water"', grid-template-columns: "minmax(0,1fr)" ]
+          custom_fields:
+            b: [ width: 100%, text-align: left ]
+            pills: [ width: 100%, margin-top: 12px ]
+            water: [ width: 100%, margin-top: 8px ]
+        custom_fields:
+          b: >
+            [[[
+              var v = (id) => Number((states[id] || { state: 0 }).state) || 0;
+              var eaten = v('sensor.nutrition_calories'), goal = v('sensor.nutrition_calorie_goal') || 2200, burned = v('sensor.garmin_connect_calories');
+              var p = Math.min(100, Math.round(100 * eaten / goal));
+              var src = entity && entity.attributes.source ? entity.attributes.source : 'manual';
+              var bar = (name, val, g, unit, c) => { var pp = Math.min(100, Math.round(100 * val / (g || 1)));
+                return '<div style="margin:6px 0"><div style="display:flex;justify-content:space-between;font-size:12px"><span>' + name + '</span><span class="muted">' + Math.round(val) + ' / ' + Math.round(g) + unit + '</span></div><div class="bar" style="margin-top:3px"><i style="width:' + pp + '%;background:' + c + '"></i></div></div>'; };
+              var last = states['input_text.last_food_entry'];
+              return '<div class="row between" style="margin-bottom:10px"><b style="font-size:14px">Food</b><span class="muted">' + src + ' · goal ' + goal.toLocaleString('en-IN') + ' kcal</span></div>'
+                + '<div style="display:flex;align-items:baseline;gap:10px"><div style="font-size:40px;font-weight:700;letter-spacing:-1.5px">' + Math.round(eaten).toLocaleString('en-IN') + '</div><div><div style="font-size:13px;font-weight:600">kcal eaten</div><div class="muted">' + (eaten ? Math.max(0, Math.round(goal - eaten)).toLocaleString('en-IN') + ' left · ' : '') + 'burned ' + Math.round(burned).toLocaleString('en-IN') + '</div></div></div>'
+                + '<div class="bar" style="height:8px;margin:12px 0 4px"><i style="width:' + p + '%;background:linear-gradient(90deg,#ffb84d,#ff2d6f)"></i></div>'
+                + bar('Protein', v('sensor.nutrition_protein'), v('input_number.goal_protein') || 130, 'g', '#ff4fa3') + bar('Carbs', v('sensor.nutrition_carbs'), Math.round(goal * 0.5 / 4), 'g', '#3fe3ff') + bar('Fat', v('sensor.nutrition_fat'), Math.round(goal * 0.3 / 9), 'g', '#ff9f2e')
+                + '<div class="muted" style="margin-top:8px;font-size:11px">' + (last && last.state ? 'Last: ' + last.state : 'Nothing logged yet · tap a chip or log in Garmin') + '</div>';
+            ]]]
+          pills:
+            card:
+              type: custom:layout-card
+              layout_type: custom:grid-layout
+              layout:
+                grid-template-columns: repeat(auto-fit, minmax(96px, 1fr))
+                grid-gap: 8px
+                margin: 0
+                padding: 0
+              cards:
+                - type: custom:button-card
+                  template: chip
+                  name: Snack 200
+                  icon: mdi:plus
+                  variables: { color: var(--neon-lime) }
+                  tap_action: { action: call-service, service: script.food_add, data: { calories: 200, protein: 5, carbs: 25, fat: 8, name: Snack } }
+                - type: custom:button-card
+                  template: chip
+                  name: Meal 600
+                  icon: mdi:plus
+                  variables: { color: var(--neon-orange) }
+                  tap_action: { action: call-service, service: script.food_add, data: { calories: 600, protein: 30, carbs: 70, fat: 18, name: Meal } }
+                - type: custom:button-card
+                  template: chip
+                  name: Shake
+                  icon: mdi:plus
+                  variables: { color: var(--neon-pink) }
+                  tap_action: { action: call-service, service: script.food_add, data: { calories: 120, protein: 30, carbs: 3, fat: 1, name: Protein shake } }
+                - type: custom:button-card
+                  template: chip
+                  name: Custom
+                  icon: mdi:pencil
+                  variables: { color: var(--neon-purple) }
+                  tap_action: { action: more-info, entity: input_number.food_calories }
+          water:
+            card:
+              type: custom:layout-card
+              layout_type: custom:grid-layout
+              layout:
+                grid-template-columns: minmax(0,1.6fr) minmax(0,1fr)
+                grid-gap: 8px
+                margin: 0
+                padding: 0
+                align-items: center
+              cards:
+                - type: custom:button-card
+                  template: usage_row
+                  name: Water
+                  icon: mdi:cup-water
+                  entity: sensor.water_today
+                  variables:
+                    color: "#3fe3ff"
+                    pct: "[[[ var w = states['sensor.water_today'], g = states['input_number.goal_water_ml']; return w && g ? Math.min(100, Math.round(100 * Number(w.state) / Number(g.state))) : 0; ]]]"
+                  tap_action: { action: call-service, service: script.water_add, data: { ml: 250 } }
+                - type: custom:button-card
+                  template: chip
+                  name: 250 mL
+                  icon: mdi:plus
+                  variables: { color: var(--neon-cyan) }
+                  tap_action: { action: call-service, service: script.water_add, data: { ml: 250 } }
+
+      # ================= BODY: weight + burn tiles, 90-day weight line =================
+      - type: custom:button-card
+        template: glass
+        entity: sensor.garmin_connect_weight
+        triggers_update: [sensor.garmin_connect_calories, sensor.garmin_connect_active_calories, sensor.garmin_connect_average_spo2, sensor.garmin_connect_bmi, sensor.garmin_connect_body_fat]
+        show_icon: false
+        show_name: false
+        show_state: false
+        tap_action: { action: more-info }
+        styles:
+          grid: [ grid-template-areas: '"h" "s" "c"', grid-template-columns: "minmax(0,1fr)" ]
+          custom_fields:
+            h: [ width: 100%, text-align: left ]
+            s: [ width: 100%, text-align: left ]
+            c: [ width: calc(100% + 16px), margin: 6px -8px 0 ]
+        custom_fields:
+          h: >
+            [[[ var n = (id, dp) => { var e = states[id]; return e && !isNaN(Number(e.state)) ? Number(e.state).toFixed(dp) : null; };
+                var bmi = n('sensor.garmin_connect_bmi', 1), fat = n('sensor.garmin_connect_body_fat', 1);
+                var meta = [bmi ? 'BMI ' + bmi : '', fat ? fat + '% fat' : ''].filter(Boolean).join(' · ') || 'weight · 90 days';
+                return '<div class="row between" style="margin-bottom:10px"><b style="font-size:14px">Body</b><span class="muted">' + meta + '</span></div>'; ]]]
+          s: >
+            [[[
+              var n = (id, dp) => { var e = states[id]; return e && !isNaN(Number(e.state)) ? Number(e.state).toFixed(dp) : '—'; };
+              var u = (t) => ' <span class="muted" style="font-size:12px;font-weight:500">' + t + '</span>';
+              var tile = (c, val, lab) => '<div class="st" style="--c:' + c + '"><div class="mid">' + val + '</div><div class="muted">' + lab + '</div></div>';
+              var burned = n('sensor.garmin_connect_calories', 0), active = n('sensor.garmin_connect_active_calories', 0);
+              return '<div class="stat4">' + tile('#3fe3ff', n('sensor.garmin_connect_weight', 1) + u('kg'), 'Weight') + tile('#ff4fa3', (burned === '—' ? '—' : Number(burned).toLocaleString('en-IN')) + u('kcal'), 'Burned today')
+                + tile('#ff9f2e', (active === '—' ? '—' : Number(active).toLocaleString('en-IN')) + u('kcal'), 'Active burn') + tile('#b5e21c', n('sensor.garmin_connect_average_spo2', 0) + u('%'), 'SpO₂ avg') + '</div>';
+            ]]]
+          c:
+            card:
+              type: conditional
+              conditions:
+                - condition: numeric_state
+                  entity: sensor.garmin_connect_weight
+                  above: -1
+              card:
+                type: custom:apexcharts-card
+                header: { show: false }
+                card_mod:
+                  style: |
+                    ha-card { background: none; border: none; box-shadow: none; }
+                graph_span: 90d
+                apex_config:
+                  chart: { height: 120, toolbar: { show: false }, parentHeightOffset: 0 }
+                  grid: { borderColor: "var(--nc-track)", strokeDashArray: 3, padding: { left: 0, right: 0 } }
+                  stroke: { curve: smooth, width: 3 }
+                  fill: { type: gradient, gradient: { shadeIntensity: 1, opacityFrom: .35, opacityTo: 0, stops: [0, 90] } }
+                  dataLabels: { enabled: false }
+                  xaxis: { labels: { style: { colors: "var(--nc-muted)", fontSize: "10px" } }, axisBorder: { show: false }, axisTicks: { show: false } }
+                  yaxis: { labels: { style: { colors: "var(--nc-dim)", fontSize: "10px" } }, decimalsInFloat: 1, tickAmount: 3 }
+                  legend: { show: false }
+                  tooltip: { theme: dark }
+                series:
+                  - entity: sensor.garmin_connect_weight
+                    name: Weight
+                    type: area
+                    color: "#3fe3ff"
+                    group_by: { func: last, duration: 1d }
+                    extend_to: now
+
+  # ================= floating now-playing bar =================
+  - type: custom:button-card
+    view_layout: { grid-area: now }
+    template: now_bar
+    entity: media_player.music_speaker
+    triggers_update: [media_player.bedroom_fire_tv, media_player.music_speaker, media_player.bedroom_soundbar]

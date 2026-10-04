@@ -1,0 +1,615 @@
+# Finance: spending + upcoming bills only. No net worth. Transactions are stored by a separate
+# self-hosted service ("spendparse", not included) that parses bank SMS with an LLM.
+#
+# Flow: phone (an automation app posting to webhook finance_webhook_id, or the companion-app
+#       notification sensor) -> rest_command.spendparse_sms (POST <spendparse>/sms)
+#       -> spendparse stores the txn, posts back to webhook finance_txn_webhook_id
+#       -> script.spend_add fills spent_<category>. Low confidence -> notification with category buttons
+#       -> tap -> rest_command.spendparse_set_category + script.spend_move.
+#
+# A refund (a bank credit spendparse matches to an earlier debit) or a reimbursement (someone paid you back
+# directly, via script.spend_mark_reimbursed) both come back through this same webhook as {"reverse": true, ...}
+# and script.spend_reverse subtracts the amount back out.
+# spendparse API: GET /feed, POST /sms, POST /txn, POST /txn/<id>/category, POST /txn/<id>/reimburse,
+# all with header X-Token. Without it the spend card still works from the counters, minus the feed.
+# Secrets: finance_webhook_id, finance_txn_webhook_id, spendparse_token, spendparse_*_url (secrets.example.yaml).
+
+input_number:
+  spent_this_month:
+    name: Spent this month
+    min: 0
+    max: 500000
+    step: 1
+    unit_of_measurement: "₹"
+    icon: mdi:cash-minus
+    mode: box
+  budget_month:
+    name: Monthly budget
+    min: 0
+    max: 500000
+    step: 500
+    unit_of_measurement: "₹"
+    icon: mdi:target
+    mode: box
+    initial: 50000   # example budget
+  spent_food:
+    name: Spent · Food
+    min: 0
+    max: 200000
+    step: 1
+    unit_of_measurement: "₹"
+    mode: box
+  spent_subs:
+    name: Spent · Subscriptions
+    min: 0
+    max: 200000
+    step: 1
+    unit_of_measurement: "₹"
+    mode: box
+  spent_travel:
+    name: Spent · Travel
+    min: 0
+    max: 200000
+    step: 1
+    unit_of_measurement: "₹"
+    mode: box
+  spent_shopping:
+    name: Spent · Shopping
+    min: 0
+    max: 200000
+    step: 1
+    unit_of_measurement: "₹"
+    mode: box
+  spent_other:
+    name: Spent · Other
+    min: 0
+    max: 200000
+    step: 1
+    unit_of_measurement: "₹"
+    mode: box
+  manual_amount:
+    name: Manual · amount
+    min: 0
+    max: 200000
+    step: 1
+    unit_of_measurement: "₹"
+    icon: mdi:cash
+    mode: box
+  # Bill tiles = last payment spendparse recognised for that bill (BILL_PATTERNS in spendparse/app.py).
+  # No SMS match yet (e.g. car) -> set the amount by hand in Settings > Helpers.
+  bill_car_amount:
+    name: Bill · Car
+    min: 0
+    max: 500000
+    step: 1
+    unit_of_measurement: "₹"
+    mode: box
+  bill_electricity_amount:
+    name: Bill · Electricity
+    min: 0
+    max: 50000
+    step: 1
+    unit_of_measurement: "₹"
+    mode: box
+  bill_internet_amount:
+    name: Bill · Internet
+    min: 0
+    max: 20000
+    step: 1
+    unit_of_measurement: "₹"
+    mode: box
+
+input_datetime:
+  bill_car_due:
+    name: Due · Car
+    has_date: true
+    has_time: false
+  bill_electricity_due:
+    name: Due · Electricity
+    has_date: true
+    has_time: false
+  bill_internet_due:
+    name: Due · Internet
+    has_date: true
+    has_time: false
+  bill_car_paid:
+    name: Paid · Car
+    has_date: true
+    has_time: false
+  bill_electricity_paid:
+    name: Paid · Electricity
+    has_date: true
+    has_time: false
+  bill_internet_paid:
+    name: Paid · Internet
+    has_date: true
+    has_time: false
+
+input_text:
+  last_bank_sms:
+    name: Last bank SMS
+    max: 255
+  last_bank_sms_sender:
+    name: Last bank SMS sender
+    max: 64
+  last_txn:
+    name: Last transaction
+    max: 255
+    icon: mdi:receipt-text
+  last_txn_id:
+    name: Last transaction · id
+    max: 32
+    icon: mdi:identifier
+  manual_merchant:
+    name: Manual · merchant
+    max: 60
+    initial: ""   # blank on every start (replaces the old start-event automation, which raced input_text setup)
+    icon: mdi:store
+
+input_select:
+  manual_category:
+    name: Manual · category
+    options: [food, subs, travel, shopping, other]
+    initial: other
+    icon: mdi:shape
+
+template:
+  - sensor:
+      - name: "Budget used"
+        unique_id: budget_used_pct
+        unit_of_measurement: "%"
+        icon: mdi:chart-donut
+        state: >
+          {% set b = states('input_number.budget_month') | float(0) %}
+          {% set s = states('input_number.spent_this_month') | float(0) %}
+          {{ (100 * s / b) | round(0) if b > 0 else 0 }}
+      - name: "Bills due 14d"
+        unique_id: bills_due_14d
+        unit_of_measurement: "₹"
+        icon: mdi:calendar-alert
+        state: >
+          {% set ns = namespace(total=0) %}
+          {% for b in ['car','electricity','internet'] %}
+            {% set due = states('input_datetime.bill_' ~ b ~ '_due') %}
+            {% if due not in ['unknown','unavailable',''] %}
+              {% set d = (as_datetime(due) | as_local - now()).days %}
+              {% if 0 <= d <= 14 %}
+                {% set ns.total = ns.total + states('input_number.bill_' ~ b ~ '_amount') | float(0) %}
+              {% endif %}
+            {% endif %}
+          {% endfor %}
+          {{ ns.total | round(0) }}
+
+# Everything the spend card shows under the chart, straight from spendparse (insight sentence, predicted
+# renewals, card dues, recent rows, last 5 days). Polled every 10 min and refreshed right after every webhook.
+sensor:
+  - platform: rest
+    name: Spend feed
+    unique_id: spend_feed
+    resource: !secret spendparse_feed_url
+    headers:
+      X-Token: !secret spendparse_token
+    value_template: "{{ value_json.updated }}"
+    json_attributes: [insight, coming_up, cards, recent, days]
+    scan_interval: 600
+    timeout: 20
+
+rest_command:
+  spendparse_sms:
+    url: !secret spendparse_sms_url
+    method: POST
+    timeout: 90
+    headers:
+      X-Token: !secret spendparse_token
+    content_type: "application/json"
+    payload: '{"sender": {{ sender | tojson }}, "text": {{ text | tojson }}}'
+  spendparse_txn:
+    url: !secret spendparse_txn_url
+    method: POST
+    timeout: 15
+    headers:
+      X-Token: !secret spendparse_token
+    content_type: "application/json"
+    payload: '{"amount": {{ amount | float(0) }}, "merchant": {{ merchant | tojson }}, "category": {{ category | tojson }}}'
+  spendparse_set_category:
+    url: !secret spendparse_category_url   # template, uses {{ txn_id }}
+    method: POST
+    timeout: 15
+    headers:
+      X-Token: !secret spendparse_token
+    content_type: "application/json"
+    payload: '{"category": {{ category | tojson }}}'
+  spendparse_reimburse:
+    url: !secret spendparse_reimburse_url  # template, uses {{ txn_id }}
+    method: POST
+    timeout: 15
+    headers:
+      X-Token: !secret spendparse_token
+
+script:
+  spend_add:
+    alias: "Spend · add a transaction"
+    icon: mdi:cash-plus
+    mode: queued
+    fields:
+      amount: { example: 450 }
+      category: { example: food }
+      merchant: { example: Swiggy }
+      txn_id: { example: "a1b2c3d4e5f6" }
+      bill: { example: electricity }
+    sequence:
+      - variables:
+          cat: "{{ category if category in ['food','subs','travel','shopping','other'] else 'other' }}"
+          ent: "input_number.spent_{{ cat }}"
+      - action: input_number.set_value
+        target: { entity_id: "{{ ent }}" }
+        data: { value: "{{ [states(ent) | float(0) + (amount | float(0)), 200000] | min }}" }
+      - if: "{{ bill is defined and bill in ['car','electricity','internet'] }}"
+        then:
+          - action: script.bill_paid
+            data: { bill: "{{ bill }}", amount: "{{ amount }}", paid: "{{ now().date() }}" }
+      - action: input_number.set_value
+        target: { entity_id: input_number.spent_this_month }
+        data: { value: "{{ [states('input_number.spent_this_month') | float(0) + (amount | float(0)), 500000] | min }}" }
+      - action: input_text.set_value
+        target: { entity_id: input_text.last_txn }
+        data: { value: "{{ now().strftime('%d %b %H:%M') }} · {{ merchant | default('?') }} · ₹{{ amount | float(0) | round(0) | int }} · {{ cat }}" }
+      - if: "{{ txn_id is defined and txn_id not in [none, ''] }}"
+        then:
+          - action: input_text.set_value
+            target: { entity_id: input_text.last_txn_id }
+            data: { value: "{{ txn_id }}" }
+  bill_paid:
+    alias: "Bill · record a payment (fills the bill tile)"
+    icon: mdi:receipt-text-check
+    mode: queued
+    fields:
+      bill: { example: electricity }
+      amount: { example: 1500 }
+      paid: { example: "2026-01-15" }
+    sequence:
+      - condition: "{{ bill in ['car','electricity','internet'] }}"
+      - action: input_number.set_value
+        target: { entity_id: "input_number.bill_{{ bill }}_amount" }
+        data: { value: "{{ amount | float(0) }}" }
+      - action: input_datetime.set_datetime
+        target: { entity_id: "input_datetime.bill_{{ bill }}_paid" }
+        data: { date: "{{ paid }}" }
+      # Next bill is expected a month after this payment.
+      - action: input_datetime.set_datetime
+        target: { entity_id: "input_datetime.bill_{{ bill }}_due" }
+        data: { date: "{{ (as_datetime(paid) + timedelta(days=30)).date() }}" }
+  spend_reverse:
+    alias: "Spend · reverse an amount (refund or reimbursed)"
+    icon: mdi:cash-refund
+    mode: queued
+    fields:
+      amount: { example: 450 }
+      category: { example: food }
+      merchant: { example: Swiggy }
+      label: { example: Refund }
+    sequence:
+      - variables:
+          cat: "{{ category if category in ['food','subs','travel','shopping','other'] else 'other' }}"
+          ent: "input_number.spent_{{ cat }}"
+      - action: input_number.set_value
+        target: { entity_id: "{{ ent }}" }
+        data: { value: "{{ [ [states(ent) | float(0) - (amount | float(0)), 200000] | min, 0] | max }}" }
+      - action: input_number.set_value
+        target: { entity_id: input_number.spent_this_month }
+        data: { value: "{{ [ [states('input_number.spent_this_month') | float(0) - (amount | float(0)), 500000] | min, 0] | max }}" }
+      - action: input_text.set_value
+        target: { entity_id: input_text.last_txn }
+        data: { value: "{{ now().strftime('%d %b %H:%M') }} · {{ label | default('Reversed') }} · -₹{{ amount | float(0) | round(0) | int }} · {{ merchant | default('') }} · {{ cat }}" }
+  spend_mark_reimbursed:
+    alias: "Spend · mark the last transaction as reimbursed"
+    icon: mdi:account-cash
+    mode: single
+    fields:
+      txn_id: { example: "a1b2c3d4e5f6" }
+    sequence:
+      - variables:
+          tid: "{{ txn_id | default(states('input_text.last_txn_id'), true) }}"
+      - condition: "{{ tid not in [none, '', 'unknown', 'unavailable'] }}"
+      - action: rest_command.spendparse_reimburse
+        data: { txn_id: "{{ tid }}" }
+        response_variable: r
+      # rest_command already parses a JSON response body into r.content - no from_json needed (and it
+      # would fail: content is a dict, not a JSON string).
+      - condition: "{{ r.status == 200 }}"
+      - action: script.spend_reverse
+        data:
+          amount: "{{ r.content.amount }}"
+          category: "{{ r.content.category }}"
+          merchant: "{{ r.content.merchant }}"
+          label: Reimbursed
+      - action: input_text.set_value
+        target: { entity_id: input_text.last_txn_id }
+        data: { value: "" }
+      - action: homeassistant.update_entity
+        target: { entity_id: sensor.spend_feed }
+  spend_manual:
+    alias: "Spend · add the manual entry"
+    icon: mdi:cash-plus
+    mode: single
+    sequence:
+      - condition: "{{ states('input_number.manual_amount') | float(0) > 0 }}"
+      # spendparse stores it and posts it back to the txn webhook, which fills the counters.
+      - action: rest_command.spendparse_txn
+        data:
+          amount: "{{ states('input_number.manual_amount') | float(0) }}"
+          merchant: "{{ states('input_text.manual_merchant') or 'Manual' }}"
+          category: "{{ states('input_select.manual_category') }}"
+      - action: input_number.set_value
+        target: { entity_id: input_number.manual_amount }
+        data: { value: 0 }
+      - action: input_text.set_value
+        target: { entity_id: input_text.manual_merchant }
+        data: { value: "" }
+  spend_set:
+    alias: "Spend · overwrite counters (resync from spendparse)"
+    icon: mdi:database-sync
+    mode: queued
+    fields:
+      food: { example: 0 }
+      subs: { example: 0 }
+      travel: { example: 0 }
+      shopping: { example: 0 }
+      other: { example: 0 }
+      bills: { example: '{"electricity": {"amount": 1500, "paid": "2026-01-15"}}' }
+    sequence:
+      - repeat:
+          for_each: "{{ (bills | default({})).items() | list }}"
+          sequence:
+            - action: script.bill_paid
+              data: { bill: "{{ repeat.item[0] }}", amount: "{{ repeat.item[1].amount }}", paid: "{{ repeat.item[1].paid }}" }
+      - action: input_number.set_value
+        target: { entity_id: input_number.spent_food }
+        data: { value: "{{ food | float(0) }}" }
+      - action: input_number.set_value
+        target: { entity_id: input_number.spent_subs }
+        data: { value: "{{ subs | float(0) }}" }
+      - action: input_number.set_value
+        target: { entity_id: input_number.spent_travel }
+        data: { value: "{{ travel | float(0) }}" }
+      - action: input_number.set_value
+        target: { entity_id: input_number.spent_shopping }
+        data: { value: "{{ shopping | float(0) }}" }
+      - action: input_number.set_value
+        target: { entity_id: input_number.spent_other }
+        data: { value: "{{ other | float(0) }}" }
+      - action: input_number.set_value
+        target: { entity_id: input_number.spent_this_month }
+        data: { value: "{{ (food | float(0)) + (subs | float(0)) + (travel | float(0)) + (shopping | float(0)) + (other | float(0)) }}" }
+  spend_fix_category:
+    alias: "Spend · set the category of one transaction (row tap)"
+    icon: mdi:tag-edit
+    mode: queued
+    fields:
+      txn_id: { example: "a1b2c3d4e5f6" }
+      amount: { example: 450 }
+      from_category: { example: other }
+      to_category: { example: food }
+    sequence:
+      - action: rest_command.spendparse_set_category
+        data: { txn_id: "{{ txn_id }}", category: "{{ to_category }}" }
+        response_variable: r
+      - condition: "{{ r.status == 200 }}"
+      - action: script.spend_move
+        data: { amount: "{{ amount }}", from_category: "{{ from_category }}", to_category: "{{ to_category }}" }
+      - action: homeassistant.update_entity
+        target: { entity_id: sensor.spend_feed }
+  spend_move:
+    alias: "Spend · move an amount between categories"
+    icon: mdi:swap-horizontal
+    mode: queued
+    fields:
+      amount: { example: 450 }
+      from_category: { example: other }
+      to_category: { example: travel }
+    sequence:
+      - variables:
+          src: "input_number.spent_{{ from_category }}"
+          dst: "input_number.spent_{{ to_category }}"
+      - if: "{{ from_category != to_category }}"
+        then:
+          - action: input_number.set_value
+            target: { entity_id: "{{ src }}" }
+            data: { value: "{{ [states(src) | float(0) - (amount | float(0)), 0] | max }}" }
+          - action: input_number.set_value
+            target: { entity_id: "{{ dst }}" }
+            data: { value: "{{ [states(dst) | float(0) + (amount | float(0)), 200000] | min }}" }
+
+automation:
+  - id: finance_sms_webhook
+    alias: "Finance · bank SMS webhook"
+    mode: queued
+    triggers:
+      - trigger: webhook
+        webhook_id: !secret finance_webhook_id
+        allowed_methods: [POST]
+        local_only: true
+    actions:
+      - action: input_text.set_value
+        target: { entity_id: input_text.last_bank_sms }
+        data:
+          value: "{{ (trigger.json.text | default('')) [:255] }}"
+      - action: input_text.set_value
+        target: { entity_id: input_text.last_bank_sms_sender }
+        data:
+          value: "{{ (trigger.json.sender | default('unknown')) [:64] }}"
+      - event: finance_sms_received
+        event_data:
+          sender: "{{ trigger.json.sender | default('unknown') }}"
+          text: "{{ trigger.json.text | default('') }}"
+      - action: rest_command.spendparse_sms
+        data:
+          sender: "{{ trigger.json.sender | default('unknown') }}"
+          text: "{{ trigger.json.text | default('') }}"
+
+  # Same flow without an automation app: the companion app's "Last notification" sensor (allow list = the SMS app).
+  # Only SMS-app notifications that look like a bank transaction leave HA (amount + transaction words,
+  # not an OTP or promo/reminder noise, or a credit-card statement/payment SMS).
+  # `to: null` = state (text) changes only, so a re-posted notification does not count twice.
+  - id: finance_sms_notification
+    alias: "Finance · bank SMS from phone notification"
+    mode: queued
+    triggers:
+      - trigger: state
+        entity_id: sensor.phone_last_notification
+        to: null
+    variables:
+      a: "{{ trigger.to_state.attributes }}"
+      pkg: "{{ a.get('package', '') }}"
+      sender: "{{ a.get('android.title') or 'unknown' }}"
+      text: "{{ a.get('android.bigText') or a.get('android.text') or '' }}"
+    conditions:
+      - "{{ 'messag' in pkg or 'mms' in pkg }}"
+      - >-
+        {% set t = text | string %}
+        {% set money = t is search('(rs\\.?|inr|₹)\\s*[\\d,]+', ignorecase=True) %}
+        {% set words = t is search('\\b(debited|spent|paid|sent|purchase|txn|transaction|withdrawn|used at|credited|received|refund|cashback)\\b', ignorecase=True) %}
+        {% set otp = t is search('\\b(otp|one time password|verification code)\\b', ignorecase=True) %}
+        {% set noise = t is search('\\b(is due on|due on \\d|will be (auto-)?debited|credit balance|e-?statement|min(imum)? due|reward points|cashback request|payment request|request (has been )?received|activat)', ignorecase=True) %}
+        {% set card = t is search('(credit card|cardmember|card member).*(total (amt|amount)?\\s*due|total amt:|bill of|due (on|by|date)|payment of .*(received|towards)|received a payment|no payment due)', ignorecase=True) %}
+        {{ not otp and ((money and words and not noise) or card) }}
+    actions:
+      - action: input_text.set_value
+        target: { entity_id: input_text.last_bank_sms }
+        data:
+          value: "{{ text[:255] }}"
+      - action: input_text.set_value
+        target: { entity_id: input_text.last_bank_sms_sender }
+        data:
+          value: "{{ sender[:64] }}"
+      - event: finance_sms_received
+        event_data: { sender: "{{ sender }}", text: "{{ text }}" }
+      - action: rest_command.spendparse_sms
+        data: { sender: "{{ sender }}", text: "{{ text }}" }
+
+  - id: finance_txn_webhook
+    alias: "Finance · parsed transaction from spendparse"
+    mode: queued
+    triggers:
+      - trigger: webhook
+        webhook_id: !secret finance_txn_webhook_id
+        allowed_methods: [POST]
+        local_only: true
+    variables:
+      # .get() because a {"set": ...} resync payload has none of these keys.
+      amount: "{{ trigger.json.get('amount', 0) | float(0) }}"
+      merchant: "{{ trigger.json.get('merchant', '?') }}"
+      category: "{{ trigger.json.get('category', 'other') }}"
+      confidence: "{{ trigger.json.get('confidence', 0) | float(0) }}"
+      txn_id: "{{ trigger.json.get('txn_id', '') }}"
+      bill: "{{ trigger.json.get('bill') or '' }}"
+    actions:
+      # {"set": {food:..}} comes from POST /resync on spendparse; {"reverse": true, ...} comes from a
+      # netted refund or a /txn/{id}/reimburse call; everything else is one new transaction.
+      - if: "{{ trigger.json.get('feed', false) }}"
+        then:
+          - action: homeassistant.update_entity
+            target: { entity_id: sensor.spend_feed }
+          - stop: "feed refresh only (card statement / payment SMS)"
+      - if: "{{ trigger.json.set is defined }}"
+        then:
+          - action: script.spend_set
+            data: "{{ trigger.json.set }}"
+          - action: homeassistant.update_entity
+            target: { entity_id: sensor.spend_feed }
+          - stop: "resync"
+      - if: "{{ trigger.json.get('reverse', false) }}"
+        then:
+          - action: script.spend_reverse
+            data:
+              amount: "{{ amount }}"
+              category: "{{ category }}"
+              merchant: "{{ merchant }}"
+              label: Refund
+          - action: homeassistant.update_entity
+            target: { entity_id: sensor.spend_feed }
+          - stop: "refund reversal"
+      - action: script.spend_add
+        data: { amount: "{{ amount }}", category: "{{ category }}", merchant: "{{ merchant }}", txn_id: "{{ txn_id }}", bill: "{{ bill }}" }
+      - action: homeassistant.update_entity
+        target: { entity_id: sensor.spend_feed }
+      - if: "{{ confidence < 0.7 and txn_id != '' }}"
+        then:
+          - action: notify.mobile_app_phone
+            data:
+              title: "₹{{ amount | round(0) | int }} · {{ merchant }}"
+              message: "Filed under {{ category }}. Change?"
+              data:
+                tag: "spend-{{ txn_id }}-{{ amount }}-{{ category }}"
+                group: spending
+                channel: Spending
+                notification_icon: mdi:cash-minus
+                actions:
+                  - { action: SPEND_FOOD, title: Food }
+                  - { action: SPEND_TRAVEL, title: Travel }
+                  - { action: SPEND_SHOPPING, title: Shop }
+
+  - id: finance_notification_action
+    alias: "Finance · category picked from notification"
+    mode: queued
+    triggers:
+      - trigger: event
+        event_type: mobile_app_notification_action
+        event_data: { action: SPEND_FOOD }
+      - trigger: event
+        event_type: mobile_app_notification_action
+        event_data: { action: SPEND_SUBS }
+      - trigger: event
+        event_type: mobile_app_notification_action
+        event_data: { action: SPEND_TRAVEL }
+      - trigger: event
+        event_type: mobile_app_notification_action
+        event_data: { action: SPEND_SHOPPING }
+      - trigger: event
+        event_type: mobile_app_notification_action
+        event_data: { action: SPEND_OTHER }
+    variables:
+      # tag = spend-<txn_id>-<amount>-<old category>; the tag survives on the phone, nothing else does.
+      parts: "{{ (trigger.event.data.tag | default('')).split('-') }}"
+      txn_id: "{{ parts[1] if parts | length >= 4 else '' }}"
+      amount: "{{ parts[2] | float(0) if parts | length >= 4 else 0 }}"
+      old_category: "{{ parts[3] if parts | length >= 4 else 'other' }}"
+      new_category: "{{ trigger.event.data.action | replace('SPEND_', '') | lower }}"
+    actions:
+      - condition: "{{ txn_id != '' }}"
+      - action: rest_command.spendparse_set_category
+        data: { txn_id: "{{ txn_id }}", category: "{{ new_category }}" }
+      - action: script.spend_move
+        data: { amount: "{{ amount }}", from_category: "{{ old_category }}", to_category: "{{ new_category }}" }
+      - action: input_text.set_value
+        target: { entity_id: input_text.last_txn }
+        data: { value: "{{ now().strftime('%d %b %H:%M') }} · fixed · ₹{{ amount | round(0) | int }} · {{ old_category }} → {{ new_category }}" }
+
+  - id: finance_reset_month
+    alias: "Finance · reset spending counters on the 1st"
+    triggers:
+      - trigger: time
+        at: "00:00:00"
+    conditions:
+      - condition: template
+        value_template: "{{ now().day == 1 }}"
+    actions:
+      - action: input_number.set_value
+        target:
+          entity_id:
+            - input_number.spent_this_month
+            - input_number.spent_food
+            - input_number.spent_subs
+            - input_number.spent_travel
+            - input_number.spent_shopping
+            - input_number.spent_other
+        data: { value: 0 }
+
+recorder:
+  exclude:
+    entities:
+      - input_text.last_bank_sms
+      - input_text.last_bank_sms_sender
+      - input_text.last_txn
+      - input_text.last_txn_id
+      - sensor.spend_feed
